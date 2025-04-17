@@ -12,6 +12,24 @@ st.title("Prévision des commandes hebdomadaires")
 
 uploaded_file = st.file_uploader("Charger un fichier Excel", type=["xlsx"])
 
+def format_excel(df, sheet_name):
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        df.to_excel(writer, index=False, sheet_name=sheet_name)
+
+        workbook = writer.book
+        worksheet = writer.sheets[sheet_name]
+
+        currency_cols = ["Tarif d’achat", "Valeur stock actuel", "Valeur ajoutée", "Valeur totale"]
+        for col_name in currency_cols:
+            if col_name in df.columns:
+                col_idx = df.columns.get_loc(col_name) + 1
+                col_letter = chr(64 + col_idx) if col_idx <= 26 else f"A{chr(64 + col_idx - 26)}"
+                for row in range(2, len(df) + 2):
+                    worksheet[f"{col_letter}{row}"].number_format = "€#,##0.00"
+
+    return output
+
 if uploaded_file:
     df = pd.read_excel(uploaded_file)
 
@@ -23,11 +41,10 @@ if uploaded_file:
     st.dataframe(df_forecast)
 
     if st.button("📤 Exporter la prévision standard en Excel"):
-        output = io.BytesIO()
-        df_forecast.to_excel(output, index=False, engine='openpyxl')
+        excel_data = format_excel(df_forecast, "Prévision standard")
         st.download_button(
             label="📄 Télécharger la prévision standard",
-            data=output.getvalue(),
+            data=excel_data.getvalue(),
             file_name="prevision_standard.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
@@ -43,11 +60,10 @@ if uploaded_file:
     if "df_cible" in st.session_state:
         st.dataframe(st.session_state["df_cible"])
 
-        output2 = io.BytesIO()
-        st.session_state["df_cible"].to_excel(output2, index=False, engine='openpyxl')
+        excel_data = format_excel(st.session_state["df_cible"], "Prévision cible")
         st.download_button(
             label="📄 Télécharger la prévision cible",
-            data=output2.getvalue(),
+            data=excel_data.getvalue(),
             file_name="prevision_cible.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
