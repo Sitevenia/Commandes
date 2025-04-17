@@ -1,7 +1,7 @@
 
 import pandas as pd
-from datetime import datetime
 import numpy as np
+from datetime import datetime
 
 def extract_week_number(week_str):
     try:
@@ -19,8 +19,6 @@ def run_forecast_simulation(df):
 
     if not valid_weeks:
         raise ValueError("Aucune semaine valide détectée dans les colonnes.")
-
-    current_week = max(valid_weeks, key=lambda x: extract_week_number(x))
 
     quantites = []
     valeurs_ajoutees = []
@@ -59,55 +57,56 @@ def run_forecast_simulation(df):
 
     return df
 
-
 def run_target_stock_sim(df, valeur_stock_cible):
     df = df.copy()
     df["Valeur stock actuel"] = df["Stock"] * df["Tarif d’achat"]
 
-    df["Commande proposée"] = 0
+    # Colonnes nécessaires
+    week_cols = [col for col in df.columns if '-S' in col]
+    current_week = datetime.today().isocalendar().week
+    valid_weeks = [col for col in week_cols if extract_week_number(col) is not None and extract_week_number(col) <= current_week]
+    ventes_12s = df[valid_weeks[-12:]].mean(axis=1) if len(valid_weeks) >= 12 else df[valid_weeks].mean(axis=1)
 
-    for i, row in df.iterrows():
-        stock = row["Stock"]
-        mini = row.get("Quantité mini", 0)
-        cond = row["Conditionnement"]
-        tarif = row["Tarif d’achat"]
-
-        if mini == 0 and stock < 0:
-            besoin = -stock
-        elif mini > 0 and stock < mini:
-            besoin = mini - stock
-        else:
-            besoin = 0
-
-        if besoin > 0:
-            qte = int(np.ceil(besoin / cond)) * cond
-        else:
-            qte = 0
-
-        df.at[i, "Commande proposée"] = qte
-
-    df["Valeur ajoutée"] = df["Commande proposée"] * df["Tarif d’achat"]
-    df = df.sort_values(by="Valeur ajoutée", ascending=False)
-
-    total = df["Valeur stock actuel"].sum()
     df["Quantité commandée"] = 0
+    df["Valeur ajoutée"] = 0.0
+    df["Valeur totale"] = df["Valeur stock actuel"]
+    df["Priorité"] = ventes_12s
+    df = df.sort_values(by="Priorité", ascending=False).reset_index(drop=True)
 
-    for i, row in df.iterrows():
-        if total >= valeur_stock_cible:
+    total_valeur = df["Valeur stock actuel"].sum()
+
+    iteration = 0
+    while True:
+        modifié = False
+        for i, row in df.iterrows():
+            cond = row["Conditionnement"]
+            prix = row["Tarif d’achat"]
+            stock = row["Stock"]
+            mini = row["Quantité mini"]
+            qte_actuelle = df.at[i, "Quantité commandée"]
+
+            if mini == 0 and stock >= 0:
+                continue  # ne pas stocker
+            if mini > 0 and (stock + qte_actuelle) >= mini:
+                continue  # déjà au-dessus du seuil
+
+            # Proposer une augmentation
+            ajout = cond
+            nouvelle_valeur = total_valeur + ajout * prix
+
+            if nouvelle_valeur > valeur_stock_cible:
+                continue
+
+            df.at[i, "Quantité commandée"] += ajout
+            total_valeur += ajout * prix
+            modifié = True
+
+        if not modifié:
             break
-        qte = row["Commande proposée"]
-        cond = row["Conditionnement"]
-        prix = row["Tarif d’achat"]
-
-        while qte >= cond:
-            if total + (cond * prix) <= valeur_stock_cible:
-                df.at[i, "Quantité commandée"] += cond
-                total += cond * prix
-                qte -= cond
-            else:
-                break
+        iteration += 1
+        if iteration > 10000:  # sécurité anti-boucle infinie
+            break
 
     df["Valeur ajoutée"] = df["Quantité commandée"] * df["Tarif d’achat"]
     df["Valeur totale"] = df["Valeur stock actuel"] + df["Valeur ajoutée"]
-
     return df
