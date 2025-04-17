@@ -69,14 +69,17 @@ def run_target_stock_sim(df, valeur_stock_cible):
     df["Quantité commandée"] = 0
     df["Valeur ajoutée"] = 0.0
     df["Valeur totale"] = df["Valeur stock actuel"]
-    df["Priorité"] = ventes_12s
 
-    total_valeur = df["Valeur stock actuel"].sum()
-    objectif = valeur_stock_cible
+    df["Score produit"] = ventes_12s
+    df = df.sort_values(by="Score produit", ascending=False).reset_index(drop=True)
 
-    # Tant qu'on n'a pas atteint ou dépassé l'objectif, on augmente progressivement
-    while total_valeur < objectif:
-        modifié = False
+    def calculer_valeur_totale(df_):
+        return df_["Valeur totale"].sum()
+
+    max_iterations = 10000
+    iterations = 0
+
+    while calculer_valeur_totale(df) < valeur_stock_cible and iterations < max_iterations:
         for i, row in df.iterrows():
             cond = row["Conditionnement"]
             prix = row["Tarif d’achat"]
@@ -84,25 +87,21 @@ def run_target_stock_sim(df, valeur_stock_cible):
             stock = row["Stock"]
             qte_actuelle = df.at[i, "Quantité commandée"]
 
-            # Conditions de base
+            # Conditions pour être éligible à l'ajustement
             if mini == 0 and stock >= 0 and qte_actuelle > 0:
-                continue  # pas de stock permanent sauf si nécessaire
+                continue
             if mini > 0 and (stock + qte_actuelle) >= mini:
-                continue  # déjà suffisant
-
-            ajout = cond
-            nouvelle_valeur = total_valeur + ajout * prix
-
-            if nouvelle_valeur > objectif:
                 continue
 
-            df.at[i, "Quantité commandée"] += ajout
-            total_valeur += ajout * prix
-            modifié = True
+            # Ajouter une unité de conditionnement
+            df.at[i, "Quantité commandée"] += cond
+            df.at[i, "Valeur ajoutée"] = df.at[i, "Quantité commandée"] * prix
+            df.at[i, "Valeur totale"] = df.at[i, "Valeur stock actuel"] + df.at[i, "Valeur ajoutée"]
 
-        if not modifié:
-            break
+            if calculer_valeur_totale(df) >= valeur_stock_cible:
+                break
 
-    df["Valeur ajoutée"] = df["Quantité commandée"] * df["Tarif d’achat"]
-    df["Valeur totale"] = df["Valeur stock actuel"] + df["Valeur ajoutée"]
-    return df.drop(columns=["Priorité"])
+        iterations += 1
+
+    df.drop(columns=["Score produit"], inplace=True)
+    return df
