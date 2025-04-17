@@ -66,34 +66,40 @@ def run_target_stock_sim(df, valeur_stock_cible):
     valid_weeks = [col for col in week_cols if extract_week_number(col) is not None and extract_week_number(col) <= current_week]
     ventes_12s = df[valid_weeks[-12:]].mean(axis=1) if len(valid_weeks) >= 12 else df[valid_weeks].mean(axis=1)
 
+    df["Ventes moyennes 12s"] = ventes_12s
     df["Quantité commandée"] = 0
     df["Valeur ajoutée"] = 0.0
     df["Valeur totale"] = df["Valeur stock actuel"]
-    df["Score produit"] = ventes_12s.fillna(0)
 
-    max_iterations = 10000
-    iterations = 0
+    df_valid = df[df["Ventes moyennes 12s"] > 0].copy()
 
-    while df["Valeur totale"].sum() < valeur_stock_cible and iterations < max_iterations:
-        # Trier les produits par score décroissant
-        df = df.sort_values(by="Score produit", ascending=False).reset_index(drop=True)
+    if df_valid.empty:
+        df["Stock total après commande"] = df["Stock"]
+        return df
 
-        for i, row in df.iterrows():
-            cond = row["Conditionnement"]
-            prix = row["Tarif d’achat"]
+    score_total = df_valid["Ventes moyennes 12s"].sum()
+    df_valid["Poids"] = df_valid["Ventes moyennes 12s"] / score_total
 
-            # Ajouter une unité de conditionnement
-            df.at[i, "Quantité commandée"] += cond
-            df.at[i, "Valeur ajoutée"] = df.at[i, "Quantité commandée"] * prix
-            df.at[i, "Valeur totale"] = df.at[i, "Valeur stock actuel"] + df.at[i, "Valeur ajoutée"]
+    valeur_stock_actuelle = df["Valeur stock actuel"].sum()
+    montant_a_ajouter = valeur_stock_cible - valeur_stock_actuelle
 
-            if df["Valeur totale"].sum() >= valeur_stock_cible:
-                break
-        iterations += 1
+    for i, row in df_valid.iterrows():
+        poids = row["Poids"]
+        part_montant = montant_a_ajouter * poids
+        prix = row["Tarif d’achat"]
+        cond = row["Conditionnement"]
 
-    df.drop(columns=["Score produit"], inplace=True)
+        qte = int(np.floor(part_montant / prix / cond)) * cond
+        valeur_ajout = qte * prix
+        valeur_totale = row["Valeur stock actuel"] + valeur_ajout
 
-    # Ajouter ligne TOTAL
+        df_valid.at[i, "Quantité commandée"] = qte
+        df_valid.at[i, "Valeur ajoutée"] = valeur_ajout
+        df_valid.at[i, "Valeur totale"] = valeur_totale
+
+    df.update(df_valid[["Quantité commandée", "Valeur ajoutée", "Valeur totale"]])
+    df["Stock total après commande"] = df["Stock"] + df["Quantité commandée"]
+
     total_row = pd.DataFrame({
         "Produit": ["TOTAL"],
         "Stock": [df["Stock"].sum()],
@@ -103,9 +109,11 @@ def run_target_stock_sim(df, valeur_stock_cible):
         "Valeur stock actuel": [df["Valeur stock actuel"].sum()],
         "Quantité commandée": [df["Quantité commandée"].sum()],
         "Valeur ajoutée": [df["Valeur ajoutée"].sum()],
-        "Valeur totale": [df["Valeur totale"].sum()]
+        "Valeur totale": [df["Valeur totale"].sum()],
+        "Stock total après commande": [df["Stock total après commande"].sum()]
     })
 
+    df.drop(columns=["Ventes moyennes 12s"], inplace=True)
     df = pd.concat([df, total_row], ignore_index=True)
 
     return df
