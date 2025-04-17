@@ -34,19 +34,22 @@ if uploaded_file:
 
     st.subheader("Simulation par objectif de valeur de stock")
     objectif = st.number_input("Objectif de stock global (€)", min_value=0, step=100)
+
     if st.button("Lancer simulation cible"):
         df_cible = run_target_stock_sim(df, objectif)
-        st.dataframe(df_cible)
+        st.session_state["df_cible"] = df_cible
+        st.success("Simulation cible générée.")
 
-        if st.button("📤 Exporter la prévision cible en Excel"):
-            output2 = io.BytesIO()
-            df_cible.to_excel(output2, index=False, engine='openpyxl')
-            st.download_button(
-                label="📄 Télécharger la prévision cible",
-                data=output2.getvalue(),
-                file_name="prevision_cible.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
+    if "df_cible" in st.session_state:
+        st.dataframe(st.session_state["df_cible"])
 
+        output2 = io.BytesIO()
+        st.session_state["df_cible"].to_excel(output2, index=False, engine='openpyxl')
+        st.download_button(
+            label="📄 Télécharger la prévision cible",
+            data=output2.getvalue(),
+            file_name="prevision_cible.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
 else:
     st.info("Veuillez charger un fichier Excel pour démarrer.")
