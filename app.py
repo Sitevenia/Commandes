@@ -29,7 +29,7 @@ if uploaded_file:
     st.subheader("Simulation par objectif de valeur de stock")
     objectif = st.number_input("Objectif de stock global (€)", min_value=0, step=100)
     if st.button("Lancer simulation cible"):
-        df_cible = run_target_stock_simulation(df, objectif)
+        df_cible = run_target_stock_sim(df, objectif)
         st.dataframe(df_cible)
 
     st.subheader("Produits à faible rotation")
