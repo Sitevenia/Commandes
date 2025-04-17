@@ -21,13 +21,7 @@ if uploaded_file:
     df_forecast = run_forecast_simulation(df)
     st.dataframe(df_forecast)
 
-    st.subheader("Simulation par objectif de valeur de stock")
-    objectif = st.number_input("Objectif de stock global (€)", min_value=0, step=100)
-    if st.button("Lancer simulation cible"):
-        df_cible = run_target_stock_sim(df, objectif)
-        st.dataframe(df_cible)
-
-import io
+    import io
 
 if st.button("📤 Exporter la prévision en Excel"):
     output = io.BytesIO()
@@ -38,6 +32,12 @@ if st.button("📤 Exporter la prévision en Excel"):
         file_name="prevision_commandes.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
+
+    st.subheader("Simulation par objectif de valeur de stock")
+    objectif = st.number_input("Objectif de stock global (€)", min_value=0, step=100)
+    if st.button("Lancer simulation cible"):
+        df_cible = run_target_stock_sim(df, objectif)
+        st.dataframe(df_cible)
 
 else:
     st.info("Veuillez charger un fichier Excel pour démarrer.")
