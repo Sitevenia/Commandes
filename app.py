@@ -5,6 +5,7 @@ import os
 from datetime import datetime
 import io
 import matplotlib.pyplot as plt
+from openpyxl.styles import PatternFill, numbers
 from modules.forecast import run_forecast_simulation, run_target_stock_sim
 
 st.set_page_config(layout="wide", page_title="Forecast Hebdo")
@@ -13,10 +14,37 @@ st.title("Prévision des commandes hebdomadaires")
 
 uploaded_file = st.file_uploader("Charger un fichier Excel", type=["xlsx"])
 
+EXPORT_ORDER = [
+    "Produit", "Stock", "Valeur stock actuel", "Quantités vendues", "Conditionnement", "Tarif d’achat", "Quantité mini",
+    "Quantité commandée", "Valeur ajoutée", "Valeur totale", "Stock total après commande"
+]
+
 def format_excel(df, sheet_name):
     output = io.BytesIO()
+    df_export = df.copy()
+    df_export = df_export[[col for col in EXPORT_ORDER if col in df_export.columns] + 
+                          [col for col in df_export.columns if col not in EXPORT_ORDER]]
+
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
-        df.to_excel(writer, index=False, sheet_name=sheet_name)
+        df_export.to_excel(writer, index=False, sheet_name=sheet_name)
+        worksheet = writer.sheets[sheet_name]
+
+        # Appliquer format monétaire aux colonnes en €
+        euro_cols = ["Tarif d’achat", "Valeur stock actuel", "Valeur ajoutée", "Valeur totale"]
+        for col_name in euro_cols:
+            if col_name in df_export.columns:
+                col_idx = df_export.columns.get_loc(col_name) + 1
+                for row in range(2, len(df_export) + 2):  # +2 car header +1-based index
+                    cell = worksheet.cell(row=row, column=col_idx)
+                    cell.number_format = u'€#,##0.00'
+
+        # Mettre en gris la dernière ligne si c'est TOTAL
+        last_row = len(df_export) + 1
+        if str(df_export.iloc[-1]["Produit"]).strip().upper() == "TOTAL":
+            fill = PatternFill(start_color="D9D9D9", end_color="D9D9D9", fill_type="solid")
+            for col in range(1, len(df_export.columns) + 1):
+                worksheet.cell(row=last_row, column=col).fill = fill
+
     return output
 
 if uploaded_file:
