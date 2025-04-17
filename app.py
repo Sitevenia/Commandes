@@ -26,5 +26,18 @@ if uploaded_file:
     if st.button("Lancer simulation cible"):
         df_cible = run_target_stock_sim(df, objectif)
         st.dataframe(df_cible)
+
+import io
+
+if st.button("📤 Exporter la prévision en Excel"):
+    output = io.BytesIO()
+    df_forecast.to_excel(output, index=False, engine='openpyxl')
+    st.download_button(
+        label="Télécharger le fichier Excel",
+        data=output.getvalue(),
+        file_name="prevision_commandes.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+
 else:
     st.info("Veuillez charger un fichier Excel pour démarrer.")
