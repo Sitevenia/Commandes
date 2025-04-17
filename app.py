@@ -1,11 +1,9 @@
 
 import streamlit as st
 import pandas as pd
-import os
-from datetime import datetime
 import io
 import matplotlib.pyplot as plt
-from openpyxl.styles import PatternFill, numbers
+from openpyxl.styles import PatternFill
 from modules.forecast import run_forecast_simulation, run_target_stock_sim
 
 st.set_page_config(layout="wide", page_title="Forecast Hebdo")
@@ -15,8 +13,9 @@ st.title("Prévision des commandes hebdomadaires")
 uploaded_file = st.file_uploader("Charger un fichier Excel", type=["xlsx"])
 
 EXPORT_ORDER = [
-    "Produit", "Stock", "Valeur stock actuel", "Quantités vendues", "Conditionnement", "Tarif d’achat", "Quantité mini",
-    "Quantité commandée", "Valeur ajoutée", "Valeur totale", "Stock total après commande"
+    "Produit", "Désignation", "Stock", "Valeur stock actuel", "Quantités vendues",
+    "Conditionnement", "Tarif d’achat", "Quantité mini", "Quantité commandée",
+    "Valeur ajoutée", "Valeur totale", "Stock total après commande", "Fournisseur", "Taux de rotation"
 ]
 
 def format_excel(df, sheet_name):
@@ -29,16 +28,14 @@ def format_excel(df, sheet_name):
         df_export.to_excel(writer, index=False, sheet_name=sheet_name)
         worksheet = writer.sheets[sheet_name]
 
-        # Appliquer format monétaire aux colonnes en €
         euro_cols = ["Tarif d’achat", "Valeur stock actuel", "Valeur ajoutée", "Valeur totale"]
         for col_name in euro_cols:
             if col_name in df_export.columns:
                 col_idx = df_export.columns.get_loc(col_name) + 1
-                for row in range(2, len(df_export) + 2):  # +2 car header +1-based index
+                for row in range(2, len(df_export) + 2):
                     cell = worksheet.cell(row=row, column=col_idx)
                     cell.number_format = u'€#,##0.00'
 
-        # Mettre en gris la dernière ligne si c'est TOTAL
         last_row = len(df_export) + 1
         if str(df_export.iloc[-1]["Produit"]).strip().upper() == "TOTAL":
             fill = PatternFill(start_color="D9D9D9", end_color="D9D9D9", fill_type="solid")
@@ -46,6 +43,27 @@ def format_excel(df, sheet_name):
                 worksheet.cell(row=last_row, column=col).fill = fill
 
     return output
+
+def display_dataframe(df):
+    fournisseurs = df["Fournisseur"].dropna().unique().tolist()
+    filtre_fournisseur = st.multiselect("Filtrer par fournisseur", options=fournisseurs, default=fournisseurs)
+
+    if "Taux de rotation" in df.columns:
+        sort_order = st.radio("Trier par taux de rotation", ["Aucun", "Croissant", "Décroissant"])
+        if sort_order == "Croissant":
+            df = df.sort_values(by="Taux de rotation", ascending=True)
+        elif sort_order == "Décroissant":
+            df = df.sort_values(by="Taux de rotation", ascending=False)
+
+    df = df[df["Fournisseur"].isin(filtre_fournisseur)]
+
+    if "Taux de rotation" in df.columns:
+        produits_lents = df[df["Taux de rotation"] < 10]
+        if not produits_lents.empty:
+            st.warning(f"{len(produits_lents)} produit(s) avec un taux de rotation < 10 détecté(s).")
+
+    st.dataframe(df)
+    return df
 
 if uploaded_file:
     df = pd.read_excel(uploaded_file)
@@ -55,7 +73,7 @@ if uploaded_file:
 
     st.subheader("Simulation standard")
     df_forecast = run_forecast_simulation(df)
-    st.dataframe(df_forecast)
+    display_dataframe(df_forecast)
 
     if st.button("📤 Exporter la prévision standard en Excel"):
         excel_data = format_excel(df_forecast, "Prévision standard")
@@ -77,7 +95,7 @@ if uploaded_file:
 
     if "df_cible" in st.session_state:
         df_cible = st.session_state["df_cible"]
-        st.dataframe(df_cible)
+        display_dataframe(df_cible)
 
         excel_data = format_excel(df_cible, "Prévision cible")
         st.download_button(
