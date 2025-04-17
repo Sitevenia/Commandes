@@ -87,13 +87,11 @@ def run_target_stock_sim(df, valeur_stock_cible):
             stock = row["Stock"]
             qte_actuelle = df.at[i, "Quantité commandée"]
 
-            # Conditions pour être éligible à l'ajustement
             if mini == 0 and stock >= 0 and qte_actuelle > 0:
                 continue
             if mini > 0 and (stock + qte_actuelle) >= mini:
                 continue
 
-            # Ajouter une unité de conditionnement
             df.at[i, "Quantité commandée"] += cond
             df.at[i, "Valeur ajoutée"] = df.at[i, "Quantité commandée"] * prix
             df.at[i, "Valeur totale"] = df.at[i, "Valeur stock actuel"] + df.at[i, "Valeur ajoutée"]
@@ -104,4 +102,20 @@ def run_target_stock_sim(df, valeur_stock_cible):
         iterations += 1
 
     df.drop(columns=["Score produit"], inplace=True)
+
+    # Ajouter une ligne "Total"
+    total_row = pd.DataFrame({
+        "Produit": ["TOTAL"],
+        "Stock": [df["Stock"].sum()],
+        "Conditionnement": [""],
+        "Tarif d’achat": [""],
+        "Quantité mini": [""],
+        "Valeur stock actuel": [df["Valeur stock actuel"].sum()],
+        "Quantité commandée": [df["Quantité commandée"].sum()],
+        "Valeur ajoutée": [df["Valeur ajoutée"].sum()],
+        "Valeur totale": [df["Valeur totale"].sum()]
+    })
+
+    df = pd.concat([df, total_row], ignore_index=True)
+
     return df
