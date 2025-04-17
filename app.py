@@ -22,14 +22,13 @@ if uploaded_file:
     df_forecast = run_forecast_simulation(df)
     st.dataframe(df_forecast)
 
-    # Bouton d'export Excel
-    if st.button("📤 Exporter la prévision en Excel"):
+    if st.button("📤 Exporter la prévision standard en Excel"):
         output = io.BytesIO()
         df_forecast.to_excel(output, index=False, engine='openpyxl')
         st.download_button(
-            label="Télécharger le fichier Excel",
+            label="📄 Télécharger la prévision standard",
             data=output.getvalue(),
-            file_name="prevision_commandes.xlsx",
+            file_name="prevision_standard.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
 
@@ -38,5 +37,16 @@ if uploaded_file:
     if st.button("Lancer simulation cible"):
         df_cible = run_target_stock_sim(df, objectif)
         st.dataframe(df_cible)
+
+        if st.button("📤 Exporter la prévision cible en Excel"):
+            output2 = io.BytesIO()
+            df_cible.to_excel(output2, index=False, engine='openpyxl')
+            st.download_button(
+                label="📄 Télécharger la prévision cible",
+                data=output2.getvalue(),
+                file_name="prevision_cible.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+
 else:
     st.info("Veuillez charger un fichier Excel pour démarrer.")
