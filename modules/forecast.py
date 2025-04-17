@@ -70,29 +70,30 @@ def run_target_stock_sim(df, valeur_stock_cible):
     df["Valeur ajoutée"] = 0.0
     df["Valeur totale"] = df["Valeur stock actuel"]
     df["Priorité"] = ventes_12s
-    df = df.sort_values(by="Priorité", ascending=False).reset_index(drop=True)
 
     total_valeur = df["Valeur stock actuel"].sum()
+    objectif = valeur_stock_cible
 
-    iteration = 0
-    while True:
+    # Tant qu'on n'a pas atteint ou dépassé l'objectif, on augmente progressivement
+    while total_valeur < objectif:
         modifié = False
         for i, row in df.iterrows():
             cond = row["Conditionnement"]
             prix = row["Tarif d’achat"]
+            mini = row.get("Quantité mini", 0)
             stock = row["Stock"]
-            mini = row["Quantité mini"]
             qte_actuelle = df.at[i, "Quantité commandée"]
 
-            if mini == 0 and stock >= 0:
-                continue
+            # Conditions de base
+            if mini == 0 and stock >= 0 and qte_actuelle > 0:
+                continue  # pas de stock permanent sauf si nécessaire
             if mini > 0 and (stock + qte_actuelle) >= mini:
-                continue
+                continue  # déjà suffisant
 
             ajout = cond
             nouvelle_valeur = total_valeur + ajout * prix
 
-            if nouvelle_valeur > valeur_stock_cible:
+            if nouvelle_valeur > objectif:
                 continue
 
             df.at[i, "Quantité commandée"] += ajout
@@ -101,10 +102,7 @@ def run_target_stock_sim(df, valeur_stock_cible):
 
         if not modifié:
             break
-        iteration += 1
-        if iteration > 10000:
-            break
 
     df["Valeur ajoutée"] = df["Quantité commandée"] * df["Tarif d’achat"]
     df["Valeur totale"] = df["Valeur stock actuel"] + df["Valeur ajoutée"]
-    return df
+    return df.drop(columns=["Priorité"])
