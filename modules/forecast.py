@@ -1,6 +1,7 @@
 
 import pandas as pd
 from datetime import datetime
+import numpy as np
 
 def extract_week_number(week_str):
     try:
@@ -44,36 +45,52 @@ def run_forecast_simulation(df):
 
 
 def run_target_stock_sim(df, valeur_stock_cible):
-    # Calcul de la valeur de stock actuelle par produit
-    df["Valeur stock"] = df["Stock"] * df["Tarif d’achat"]
-    valeur_stock_actuelle = df["Valeur stock"].sum()
-    
-    if valeur_stock_actuelle <= valeur_stock_cible:
-        df["Quantité commandée"] = 0
-        return df
+    df = df.copy()
+    df["Valeur stock actuel"] = df["Stock"] * df["Tarif d’achat"]
+    valeur_actuelle = df["Valeur stock actuel"].sum()
 
-    facteur_reduction = valeur_stock_cible / valeur_stock_actuelle
-    
-    results = []
-    for _, row in df.iterrows():
+    df["Commande proposée"] = 0
+
+    # Calcul d'un besoin brut par produit
+    for i, row in df.iterrows():
         stock = row["Stock"]
-        conditionnement = row["Conditionnement"]
+        mini = row.get("Quantité mini", 0)
+        cond = row["Conditionnement"]
         tarif = row["Tarif d’achat"]
-        quantite_mini = row.get("Quantité mini", 0)
-        
-        # Stock visé par produit
-        valeur_stock_produit = stock * tarif
-        valeur_cible_produit = valeur_stock_produit * facteur_reduction
-        stock_cible = valeur_cible_produit / tarif
-        qty_needed = max(0, quantite_mini - stock_cible) if quantite_mini > 0 else max(0, -stock)
 
-        # Respect du conditionnement
-        if qty_needed > 0:
-            qty_final = int(((qty_needed - 1) // conditionnement + 1) * conditionnement)
+        if mini == 0 and stock < 0:
+            besoin = -stock
+        elif mini > 0 and stock < mini:
+            besoin = mini - stock
         else:
-            qty_final = 0
-        
-        results.append(qty_final)
-    
-    df["Quantité commandée"] = results
+            besoin = 0
+
+        if besoin > 0:
+            qte = int(np.ceil(besoin / cond)) * cond
+        else:
+            qte = 0
+
+        df.at[i, "Commande proposée"] = qte
+
+    df["Valeur ajoutée"] = df["Commande proposée"] * df["Tarif d’achat"]
+    df = df.sort_values(by="Valeur ajoutée", ascending=False)
+
+    total = valeur_actuelle
+    df["Quantité commandée"] = 0
+
+    for i, row in df.iterrows():
+        if total >= valeur_stock_cible:
+            break
+        qte = row["Commande proposée"]
+        cond = row["Conditionnement"]
+        prix = row["Tarif d’achat"]
+
+        while qte >= cond:
+            if total + (cond * prix) <= valeur_stock_cible:
+                df.at[i, "Quantité commandée"] += cond
+                total += cond * prix
+                qte -= cond
+            else:
+                break
+
     return df
