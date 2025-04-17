@@ -69,41 +69,31 @@ def run_target_stock_sim(df, valeur_stock_cible):
     df["Quantité commandée"] = 0
     df["Valeur ajoutée"] = 0.0
     df["Valeur totale"] = df["Valeur stock actuel"]
-
-    df["Score produit"] = ventes_12s
-    df = df.sort_values(by="Score produit", ascending=False).reset_index(drop=True)
-
-    def calculer_valeur_totale(df_):
-        return df_["Valeur totale"].sum()
+    df["Score produit"] = ventes_12s.fillna(0)
 
     max_iterations = 10000
     iterations = 0
 
-    while calculer_valeur_totale(df) < valeur_stock_cible and iterations < max_iterations:
+    while df["Valeur totale"].sum() < valeur_stock_cible and iterations < max_iterations:
+        # Trier les produits par score décroissant
+        df = df.sort_values(by="Score produit", ascending=False).reset_index(drop=True)
+
         for i, row in df.iterrows():
             cond = row["Conditionnement"]
             prix = row["Tarif d’achat"]
-            mini = row.get("Quantité mini", 0)
-            stock = row["Stock"]
-            qte_actuelle = df.at[i, "Quantité commandée"]
 
-            if mini == 0 and stock >= 0 and qte_actuelle > 0:
-                continue
-            if mini > 0 and (stock + qte_actuelle) >= mini:
-                continue
-
+            # Ajouter une unité de conditionnement
             df.at[i, "Quantité commandée"] += cond
             df.at[i, "Valeur ajoutée"] = df.at[i, "Quantité commandée"] * prix
             df.at[i, "Valeur totale"] = df.at[i, "Valeur stock actuel"] + df.at[i, "Valeur ajoutée"]
 
-            if calculer_valeur_totale(df) >= valeur_stock_cible:
+            if df["Valeur totale"].sum() >= valeur_stock_cible:
                 break
-
         iterations += 1
 
     df.drop(columns=["Score produit"], inplace=True)
 
-    # Ajouter une ligne "Total"
+    # Ajouter ligne TOTAL
     total_row = pd.DataFrame({
         "Produit": ["TOTAL"],
         "Stock": [df["Stock"].sum()],
