@@ -4,6 +4,7 @@ import pandas as pd
 import os
 from datetime import datetime
 import io
+import matplotlib.pyplot as plt
 from modules.forecast import run_forecast_simulation, run_target_stock_sim
 
 st.set_page_config(layout="wide", page_title="Forecast Hebdo")
@@ -16,18 +17,6 @@ def format_excel(df, sheet_name):
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
         df.to_excel(writer, index=False, sheet_name=sheet_name)
-
-        workbook = writer.book
-        worksheet = writer.sheets[sheet_name]
-
-        currency_cols = ["Tarif d’achat", "Valeur stock actuel", "Valeur ajoutée", "Valeur totale"]
-        for col_name in currency_cols:
-            if col_name in df.columns:
-                col_idx = df.columns.get_loc(col_name) + 1
-                col_letter = chr(64 + col_idx) if col_idx <= 26 else f"A{chr(64 + col_idx - 26)}"
-                for row in range(2, len(df) + 2):
-                    worksheet[f"{col_letter}{row}"].number_format = "€#,##0.00"
-
     return output
 
 if uploaded_file:
@@ -55,17 +44,29 @@ if uploaded_file:
     if st.button("Lancer simulation cible"):
         df_cible = run_target_stock_sim(df, objectif)
         st.session_state["df_cible"] = df_cible
-        st.success("Simulation cible générée.")
+        valeur_finale = df_cible["Valeur totale"].sum()
+        st.success(f"Simulation terminée. Valeur totale finale : {valeur_finale:,.2f} €")
 
     if "df_cible" in st.session_state:
-        st.dataframe(st.session_state["df_cible"])
+        df_cible = st.session_state["df_cible"]
+        st.dataframe(df_cible)
 
-        excel_data = format_excel(st.session_state["df_cible"], "Prévision cible")
+        excel_data = format_excel(df_cible, "Prévision cible")
         st.download_button(
             label="📄 Télécharger la prévision cible",
             data=excel_data.getvalue(),
             file_name="prevision_cible.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
+
+        st.subheader("📊 Répartition des quantités commandées")
+        df_chart = df_cible[df_cible["Produit"] != "TOTAL"]
+        fig, ax = plt.subplots(figsize=(10, 5))
+        ax.bar(df_chart["Produit"], df_chart["Quantité commandée"], color="skyblue")
+        ax.set_xlabel("Produit")
+        ax.set_ylabel("Quantité commandée")
+        ax.set_title("Répartition des quantités commandées par produit")
+        plt.xticks(rotation=45, ha='right')
+        st.pyplot(fig)
 else:
     st.info("Veuillez charger un fichier Excel pour démarrer.")
