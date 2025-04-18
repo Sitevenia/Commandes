@@ -3,6 +3,9 @@ import pandas as pd
 
 def run_forecast_simulation(df):
     df = df.copy()
+    if "Valeur stock actuel" not in df.columns:
+        df["Valeur stock actuel"] = df["Stock"] * df["Tarif d’achat"]
+
     df["Quantité commandée"] = 0
     df["Valeur ajoutée"] = 0.0
     df["Valeur totale"] = df["Valeur stock actuel"]
@@ -18,6 +21,9 @@ def run_forecast_simulation(df):
 
 def run_target_stock_sim(df, objectif):
     df = df.copy()
+    if "Valeur stock actuel" not in df.columns:
+        df["Valeur stock actuel"] = df["Stock"] * df["Tarif d’achat"]
+
     df["Quantité commandée"] = 0
     df["Valeur ajoutée"] = 0.0
     df["Valeur totale"] = df["Valeur stock actuel"]
