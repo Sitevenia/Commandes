@@ -3,7 +3,6 @@ import pandas as pd
 
 def run_forecast_simulation(df):
     df = df.copy()
-
     if "Valeur stock actuel" not in df.columns:
         df["Valeur stock actuel"] = df["Stock"] * df["Tarif d’achat"]
 
@@ -11,7 +10,6 @@ def run_forecast_simulation(df):
     df["Valeur ajoutée"] = 0.0
     df["Valeur totale"] = df["Valeur stock actuel"]
     df["Stock total après commande"] = df["Stock"]
-
     if "Produit" in df.columns:
         total_row = {
             col: df[col].sum() if df[col].dtype.kind in "if" else "" for col in df.columns
@@ -22,7 +20,6 @@ def run_forecast_simulation(df):
 
 def run_target_stock_sim(df, objectif):
     df = df.copy()
-
     if "Valeur stock actuel" not in df.columns:
         df["Valeur stock actuel"] = df["Stock"] * df["Tarif d’achat"]
 
@@ -36,7 +33,7 @@ def run_target_stock_sim(df, objectif):
 
     while df["Valeur totale"].sum() < objectif:
         produit_eligible = df.copy()
-        produit_eligible["Progression"] = (produit_eligible["Tarif d’achat"] * conditionnement)
+        produit_eligible["Progression"] = produit_eligible["Tarif d’achat"] * conditionnement
         produit_eligible = produit_eligible[produit_eligible["Progression"] > 0]
 
         if produit_eligible.empty:
@@ -48,7 +45,7 @@ def run_target_stock_sim(df, objectif):
         df.at[idx, "Valeur totale"] = df.at[idx, "Valeur stock actuel"] + df.at[idx, "Valeur ajoutée"]
         df.at[idx, "Stock total après commande"] = df.at[idx, "Stock"] + df.at[idx, "Quantité commandée"]
 
-        if (df["Valeur totale"].sum() - objectif) > df["Tarif d’achat"].max() * df["Conditionnement"].max():
+        if df["Valeur totale"].sum() >= objectif:
             break
 
     if "Produit" in df.columns:
