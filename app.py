@@ -17,14 +17,13 @@ def format_excel(df, sheet_name):
     df_export = df.copy()
 
     ventes_cols = [col for col in df_export.columns if "-S" in col]
-    export_order = [
-        "Fournisseur", "Produit", "Désignation", "Stock", "Valeur stock actuel", 
+    ordered_cols = [
+        "Fournisseur", "Produit", "Désignation", "Stock", "Valeur stock actuel",
         "Conditionnement", "Tarif d’achat", "Quantité mini"
     ] + ventes_cols + [
         "Quantité commandée", "Stock total après commande", "Valeur ajoutée", "Valeur totale"
     ]
-
-    df_export = df_export[[col for col in export_order if col in df_export.columns]]
+    df_export = df_export[[col for col in ordered_cols if col in df_export.columns]]
 
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
         df_export.to_excel(writer, index=False, sheet_name=sheet_name)
