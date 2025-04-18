@@ -16,14 +16,16 @@ def format_excel(df, sheet_name):
     output = io.BytesIO()
     df_export = df.copy()
 
-    ventes_cols = [col for col in df_export.columns if "-S" in col]
-    ordered_cols = [
+    ventes_cols = [col for col in df_export.columns if col.startswith("2024-S")]
+    export_order = [
         "Fournisseur", "Produit", "Désignation", "Stock", "Valeur stock actuel",
         "Conditionnement", "Tarif d’achat", "Quantité mini"
     ] + ventes_cols + [
         "Quantité commandée", "Stock total après commande", "Valeur ajoutée", "Valeur totale"
     ]
-    df_export = df_export[[col for col in ordered_cols if col in df_export.columns]]
+
+    # Appliquer l'ordre exact
+    df_export = df_export[[col for col in export_order if col in df_export.columns]]
 
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
         df_export.to_excel(writer, index=False, sheet_name=sheet_name)
@@ -34,8 +36,7 @@ def format_excel(df, sheet_name):
             if col_name in df_export.columns:
                 col_idx = df_export.columns.get_loc(col_name) + 1
                 for row in range(2, len(df_export) + 2):
-                    cell = worksheet.cell(row=row, column=col_idx)
-                    cell.number_format = u'€#,##0.00'
+                    worksheet.cell(row=row, column=col_idx).number_format = u'€#,##0.00'
 
         last_row = len(df_export) + 1
         if "Produit" in df_export.columns and str(df_export.iloc[-1]["Produit"]).strip().upper() == "TOTAL":
