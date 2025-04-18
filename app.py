@@ -26,9 +26,10 @@ def format_excel(df, sheet_name):
 
     
     # Appliquer l'ordre exact
-    # Ajouter ligne TOTAL si elle n'existe pas
+    # Ajout d'une ligne TOTAL sécurisée
     if "Produit" in df_export.columns and "TOTAL" not in df_export["Produit"].astype(str).str.upper().values:
-        total_row = {col: df_export[col].sum() if df_export[col].dtype in ['float64', 'int64'] else "" for col in df_export.columns}
+        numeric_cols = df_export.select_dtypes(include=["number"]).columns
+        total_row = {col: df_export[col].sum() if col in numeric_cols else "" for col in df_export.columns}
         total_row["Produit"] = "TOTAL"
         df_export = pd.concat([df_export, pd.DataFrame([total_row])], ignore_index=True)
     
