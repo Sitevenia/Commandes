@@ -12,17 +12,19 @@ st.title("Prévision des commandes hebdomadaires")
 
 uploaded_file = st.file_uploader("Charger un fichier Excel", type=["xlsx"])
 
-EXPORT_ORDER = [
-    "Produit", "Désignation", "Stock", "Valeur stock actuel", "Quantités vendues",
-    "Conditionnement", "Tarif d’achat", "Quantité mini", "Quantité commandée",
-    "Valeur ajoutée", "Valeur totale", "Stock total après commande", "Fournisseur", "Taux de rotation"
-]
-
 def format_excel(df, sheet_name):
     output = io.BytesIO()
     df_export = df.copy()
-    df_export = df_export[[col for col in EXPORT_ORDER if col in df_export.columns] + 
-                          [col for col in df_export.columns if col not in EXPORT_ORDER]]
+
+    ventes_cols = [col for col in df_export.columns if "-S" in col]
+    export_order = [
+        "Fournisseur", "Produit", "Désignation", "Stock", "Valeur stock actuel", 
+        "Conditionnement", "Tarif d’achat", "Quantité mini"
+    ] + ventes_cols + [
+        "Quantité commandée", "Stock total après commande", "Valeur ajoutée", "Valeur totale"
+    ]
+
+    df_export = df_export[[col for col in export_order if col in df_export.columns]]
 
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
         df_export.to_excel(writer, index=False, sheet_name=sheet_name)
@@ -37,33 +39,12 @@ def format_excel(df, sheet_name):
                     cell.number_format = u'€#,##0.00'
 
         last_row = len(df_export) + 1
-        if str(df_export.iloc[-1]["Produit"]).strip().upper() == "TOTAL":
+        if "Produit" in df_export.columns and str(df_export.iloc[-1]["Produit"]).strip().upper() == "TOTAL":
             fill = PatternFill(start_color="D9D9D9", end_color="D9D9D9", fill_type="solid")
             for col in range(1, len(df_export.columns) + 1):
                 worksheet.cell(row=last_row, column=col).fill = fill
 
     return output
-
-def display_dataframe(df):
-    fournisseurs = df["Fournisseur"].dropna().unique().tolist()
-    filtre_fournisseur = st.multiselect("Filtrer par fournisseur", options=fournisseurs, default=fournisseurs)
-
-    if "Taux de rotation" in df.columns:
-        sort_order = st.radio("Trier par taux de rotation", ["Aucun", "Croissant", "Décroissant"])
-        if sort_order == "Croissant":
-            df = df.sort_values(by="Taux de rotation", ascending=True)
-        elif sort_order == "Décroissant":
-            df = df.sort_values(by="Taux de rotation", ascending=False)
-
-    df = df[df["Fournisseur"].isin(filtre_fournisseur)]
-
-    if "Taux de rotation" in df.columns:
-        produits_lents = df[df["Taux de rotation"] < 10]
-        if not produits_lents.empty:
-            st.warning(f"{len(produits_lents)} produit(s) avec un taux de rotation < 10 détecté(s).")
-
-    st.dataframe(df)
-    return df
 
 if uploaded_file:
     df = pd.read_excel(uploaded_file)
@@ -73,7 +54,7 @@ if uploaded_file:
 
     st.subheader("Simulation standard")
     df_forecast = run_forecast_simulation(df)
-    display_dataframe(df_forecast)
+    st.dataframe(df_forecast)
 
     if st.button("📤 Exporter la prévision standard en Excel"):
         excel_data = format_excel(df_forecast, "Prévision standard")
@@ -95,7 +76,7 @@ if uploaded_file:
 
     if "df_cible" in st.session_state:
         df_cible = st.session_state["df_cible"]
-        display_dataframe(df_cible)
+        st.dataframe(df_cible)
 
         excel_data = format_excel(df_cible, "Prévision cible")
         st.download_button(
