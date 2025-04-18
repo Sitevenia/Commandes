@@ -24,15 +24,7 @@ def format_excel(df, sheet_name):
         "Quantité commandée", "Stock total après commande", "Valeur ajoutée", "Valeur totale"
     ]
 
-    
     # Appliquer l'ordre exact
-    # Ajout d'une ligne TOTAL sécurisée
-    if "Produit" in df_export.columns and "TOTAL" not in df_export["Produit"].astype(str).str.upper().values:
-        numeric_cols = df_export.select_dtypes(include=["number"]).columns
-        total_row = {col: df_export[col].sum() if col in numeric_cols else "" for col in df_export.columns}
-        total_row["Produit"] = "TOTAL"
-        df_export = pd.concat([df_export, pd.DataFrame([total_row])], ignore_index=True)
-    
     df_export = df_export[[col for col in export_order if col in df_export.columns]]
 
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
