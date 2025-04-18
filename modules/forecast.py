@@ -3,10 +3,15 @@ import pandas as pd
 
 def run_forecast_simulation(df):
     df = df.copy()
-    df["Quantité commandée"] = 0  # simulation simple
+
+    if "Valeur stock actuel" not in df.columns:
+        df["Valeur stock actuel"] = df["Stock"] * df["Tarif d’achat"]
+
+    df["Quantité commandée"] = 0
     df["Valeur ajoutée"] = 0.0
     df["Valeur totale"] = df["Valeur stock actuel"]
     df["Stock total après commande"] = df["Stock"]
+
     if "Produit" in df.columns:
         total_row = {
             col: df[col].sum() if df[col].dtype.kind in "if" else "" for col in df.columns
@@ -18,7 +23,9 @@ def run_forecast_simulation(df):
 def run_target_stock_sim(df, objectif):
     df = df.copy()
 
-    # Repartir de zéro
+    if "Valeur stock actuel" not in df.columns:
+        df["Valeur stock actuel"] = df["Stock"] * df["Tarif d’achat"]
+
     df["Quantité commandée"] = 0
     df["Valeur ajoutée"] = 0.0
     df["Valeur totale"] = df["Valeur stock actuel"]
