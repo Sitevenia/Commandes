@@ -24,7 +24,14 @@ def format_excel(df, sheet_name):
         "Quantité commandée", "Stock total après commande", "Valeur ajoutée", "Valeur totale"
     ]
 
+    
     # Appliquer l'ordre exact
+    # Ajouter ligne TOTAL si elle n'existe pas
+    if "Produit" in df_export.columns and "TOTAL" not in df_export["Produit"].astype(str).str.upper().values:
+        total_row = {col: df_export[col].sum() if df_export[col].dtype in ['float64', 'int64'] else "" for col in df_export.columns}
+        total_row["Produit"] = "TOTAL"
+        df_export = pd.concat([df_export, pd.DataFrame([total_row])], ignore_index=True)
+    
     df_export = df_export[[col for col in export_order if col in df_export.columns]]
 
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
