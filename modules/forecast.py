@@ -1,66 +1,68 @@
+
 import pandas as pd
-import numpy as np
 
 def run_forecast_simulation(df):
     df = df.copy()
-    week_cols = [col for col in df.columns if isinstance(col, int) and 1 <= col <= 52]
-    current_week = max([col for col in week_cols if col <= pd.Timestamp.today().week])
 
-    last_12_weeks = [w for w in range(current_week - 11, current_week + 1) if w in week_cols]
-    same_weeks_last_year = [w for w in last_12_weeks]
+    # Sécurisation des colonnes indispensables
+    if "Tarif d’achat" not in df.columns:
+        df["Tarif d’achat"] = 0.0
+    if "Valeur stock actuel" not in df.columns:
+        df["Valeur stock actuel"] = df.get("Stock", 0) * df.get("Tarif d’achat", 0)
 
-    df['Moyenne_12s'] = df[last_12_weeks].mean(axis=1)
-    df['Moyenne_N-1'] = df[[f"{w}_N-1" for w in same_weeks_last_year if f"{w}_N-1" in df.columns]].mean(axis=1)
+    df["Quantité commandée"] = 0
+    df["Valeur ajoutée"] = 0.0
+    df["Valeur totale"] = df["Valeur stock actuel"]
+    df["Stock total après commande"] = df.get("Stock", 0)
 
-    df['Prévision'] = (df['Moyenne_12s'] + df['Moyenne_N-1']) / 2
-    df['Prévision'] = df['Prévision'].fillna(0)
-
-    df['Max_s'] = df[last_12_weeks].max(axis=1)
-    df['Ratio_max_moy'] = df['Max_s'] / df['Moyenne_12s']
-    df['Anomalie'] = df['Ratio_max_moy'] > 3
-
-    for i, row in df.iterrows():
-        if row['Anomalie']:
-            if row['Prévision'] > 0:
-                df.at[i, 'Prévision'] = row['Moyenne_N-1']
-
-    ventes_rec = (df[last_12_weeks] > 0).sum(axis=1)
-    df.loc[ventes_rec == 1, 'Prévision'] = 0
-
-    df['Commande simulée'] = 0
-
-    for i, row in df.iterrows():
-        prevision = row['Prévision']
-        stock = row['Stock']
-        mini = row['Quantité mini']
-        cond = row['Conditionnement']
-
-        if mini == 0:
-            if stock < 0:
-                besoin = -stock
-                qte = int(np.ceil(besoin / cond)) * cond
-            else:
-                qte = 0
-        else:
-            if stock < mini:
-                besoin = mini - stock
-                qte = int(np.ceil(besoin / cond)) * cond
-            else:
-                qte = 0
-
-        df.at[i, 'Commande simulée'] = qte
+    if "Produit" in df.columns:
+        total_row = {
+            col: df[col].sum() if pd.api.types.is_numeric_dtype(df[col]) else "" for col in df.columns
+        }
+        total_row["Produit"] = "TOTAL"
+        df = pd.concat([df, pd.DataFrame([total_row])], ignore_index=True)
 
     return df
 
-def run_target_stock_simulation(df, objectif):
-    df = run_forecast_simulation(df)
-    df = df.sort_values(by='Rotation', ascending=False)
-    total_value = (df['Commande simulée'] * df['Tarif achat']).sum()
+def run_target_stock_sim(df, objectif):
+    df = df.copy()
 
-    while total_value > objectif and df['Commande simulée'].sum() > 0:
-        for i, row in df.iterrows():
-            if row['Commande simulée'] >= row['Conditionnement']:
-                df.at[i, 'Commande simulée'] -= row['Conditionnement']
-        total_value = (df['Commande simulée'] * df['Tarif achat']).sum()
+    # Sécurisation des colonnes indispensables
+    if "Tarif d’achat" not in df.columns:
+        df["Tarif d’achat"] = 0.0
+    if "Valeur stock actuel" not in df.columns:
+        df["Valeur stock actuel"] = df.get("Stock", 0) * df.get("Tarif d’achat", 0)
+
+    df["Quantité commandée"] = 0
+    df["Valeur ajoutée"] = 0.0
+    df["Valeur totale"] = df["Valeur stock actuel"]
+    df["Stock total après commande"] = df.get("Stock", 0)
+
+    df["Conditionnement"] = df.get("Conditionnement", 1).replace(0, 1)
+    df["Tarif d’achat"].fillna(0, inplace=True)
+
+    while df["Valeur totale"].sum() < objectif:
+        produit_eligible = df.copy()
+        produit_eligible["Progression"] = produit_eligible["Tarif d’achat"] * df["Conditionnement"]
+        produit_eligible = produit_eligible[produit_eligible["Progression"] > 0]
+
+        if produit_eligible.empty:
+            break
+
+        idx = produit_eligible["Valeur stock actuel"].idxmin()
+        df.at[idx, "Quantité commandée"] += df.at[idx, "Conditionnement"]
+        df.at[idx, "Valeur ajoutée"] = df.at[idx, "Quantité commandée"] * df.at[idx, "Tarif d’achat"]
+        df.at[idx, "Valeur totale"] = df.at[idx, "Valeur stock actuel"] + df.at[idx, "Valeur ajoutée"]
+        df.at[idx, "Stock total après commande"] = df.at[idx, "Stock"] + df.at[idx, "Quantité commandée"]
+
+        if df["Valeur totale"].sum() >= objectif:
+            break
+
+    if "Produit" in df.columns:
+        total_row = {
+            col: df[col].sum() if pd.api.types.is_numeric_dtype(df[col]) else "" for col in df.columns
+        }
+        total_row["Produit"] = "TOTAL"
+        df = pd.concat([df, pd.DataFrame([total_row])], ignore_index=True)
 
     return df
