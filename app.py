@@ -4,10 +4,65 @@ import pandas as pd
 import io
 import matplotlib.pyplot as plt
 from modules.forecast import run_forecast_simulation, run_target_stock_sim
-from modules.export_tools import export_three_sheets
+
+def export_three_sheets(df_standard, df_target):
+    output = io.BytesIO()
+
+    # Création du comparatif simplifié
+    df_comp = df_standard.copy()
+    df_target_renamed = df_target.copy()
+
+    df_comp = df_comp.rename(columns={
+        "Fournisseur": "Fournisseur (standard)",
+        "Stock": "Stock (standard)",
+        "Conditionnement": "Conditionnement (standard)",
+        "Tarif d’achat": "Tarif d’achat (standard)",
+        "Quantité mini": "Quantité mini (standard)",
+        "Valeur stock actuel": "Valeur stock actuel (standard)",
+        "Quantité commandée": "Quantité commandée (standard)",
+        "Valeur ajoutée": "Valeur ajoutée (standard)",
+        "Valeur totale": "Valeur totale (standard)"
+    })
+
+    df_target_renamed = df_target_renamed.rename(columns={
+        "Quantité commandée": "Quantité commandée (objectif)",
+        "Valeur ajoutée": "Valeur ajoutée (objectif)",
+        "Valeur totale": "Valeur totale (objectif)",
+        "Stock total après commande": "Stock total après commande (objectif)"
+    })
+
+    df_comparatif = pd.merge(
+        df_comp,
+        df_target_renamed[[
+            "Produit", "Désignation",
+            "Quantité commandée (objectif)",
+            "Valeur ajoutée (objectif)",
+            "Valeur totale (objectif)",
+            "Stock total après commande (objectif)"
+        ]],
+        on=["Produit", "Désignation"],
+        how="outer"
+    )
+
+    # Réorganisation des colonnes
+    export_columns = [
+        "Produit", "Désignation", "Fournisseur (standard)", "Stock (standard)", "Conditionnement (standard)",
+        "Tarif d’achat (standard)", "Quantité mini (standard)", "Valeur stock actuel (standard)",
+        "Quantité commandée (standard)", "Valeur ajoutée (standard)", "Valeur totale (standard)",
+        "Quantité commandée (objectif)", "Valeur ajoutée (objectif)", "Valeur totale (objectif)",
+        "Stock total après commande (objectif)"
+    ]
+
+    df_comparatif = df_comparatif[[col for col in export_columns if col in df_comparatif.columns]]
+
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        df_standard.to_excel(writer, sheet_name="Simulation standard", index=False)
+        df_target.to_excel(writer, sheet_name="Simulation objectif", index=False)
+        df_comparatif.to_excel(writer, sheet_name="Comparatif", index=False)
+
+    return output
 
 st.set_page_config(layout="wide", page_title="Forecast Hebdo")
-
 st.title("Prévision des commandes hebdomadaires")
 
 uploaded_file = st.file_uploader("Charger un fichier Excel", type=["xlsx"])
