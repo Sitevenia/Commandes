@@ -166,6 +166,7 @@ if uploaded_file:
                 st.subheader("📊 Comparatif")
                 comparatif = df[["Référence fournisseur", "Référence produit", "Désignation"]].copy()
                 comparatif["Qté Sim 1"] = df["Qté Sim 1"]
+                comparatif["Montant Sim 1"] = df["Montant Sim 1"]
                 comparatif["Qté Sim 2"] = df_sim2["Qté Sim 2"]
                 comparatif["Montant Sim 2"] = df_sim2["Montant Sim 2"]
                 st.dataframe(comparatif)
