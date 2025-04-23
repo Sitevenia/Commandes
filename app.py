@@ -156,6 +156,7 @@ if uploaded_file:
                     else:
                         st.error("Erreur : La longueur de la répartition ne correspond pas aux mois sélectionnés.")
 
+                df["Montant Sim 1"] = df["Qté Sim 1"] * df["Tarif d'achat"]
                 df_sim2["Montant Sim 2"] = df_sim2["Qté Sim 2"] * df_sim2["Tarif d'achat"]
                 total_sim2 = df_sim2["Montant Sim 2"].sum()
                 st.metric("✅ Montant Simulation 2", f"€ {total_sim2:,.2f}")
@@ -174,7 +175,7 @@ if uploaded_file:
                 output = io.BytesIO()
                 with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
                     # Filtrer les colonnes avant l'exportation
-                    df_filtered_sim1 = df[["Référence fournisseur", "Référence produit", "Désignation", "Qté Sim 1"] + selected_months]
+                    df_filtered_sim1 = df[["Référence fournisseur", "Référence produit", "Désignation", "Qté Sim 1", "Montant Sim 1"] + selected_months]
                     df_filtered_sim1.to_excel(writer, sheet_name="Simulation_1", index=False)
 
                     df_filtered_sim2 = df_sim2[["Référence fournisseur", "Référence produit", "Désignation", "Qté Sim 2", "Montant Sim 2"] + selected_months]
