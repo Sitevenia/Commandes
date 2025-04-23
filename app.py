@@ -156,7 +156,6 @@ if uploaded_file:
                     else:
                         st.error("Erreur : La longueur de la répartition ne correspond pas aux mois sélectionnés.")
 
-                df["Montant Sim 1"] = df["Qté Sim 1"] * df["Tarif d'achat"]
                 df_sim2["Montant Sim 2"] = df_sim2["Qté Sim 2"] * df_sim2["Tarif d'achat"]
                 total_sim2 = df_sim2["Montant Sim 2"].sum()
                 st.metric("✅ Montant Simulation 2", f"€ {total_sim2:,.2f}")
