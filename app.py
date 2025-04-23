@@ -166,7 +166,6 @@ if uploaded_file:
                 st.subheader("📊 Comparatif")
                 comparatif = df[["Référence fournisseur", "Référence produit", "Désignation"]].copy()
                 comparatif["Qté Sim 1"] = df["Qté Sim 1"]
-                comparatif["Montant Sim 1"] = df["Montant Sim 1"]
                 comparatif["Qté Sim 2"] = df_sim2["Qté Sim 2"]
                 comparatif["Montant Sim 2"] = df_sim2["Montant Sim 2"]
                 st.dataframe(comparatif)
@@ -181,7 +180,7 @@ if uploaded_file:
                     df_filtered_sim2 = df_sim2[["Référence fournisseur", "Référence produit", "Désignation", "Qté Sim 2", "Montant Sim 2"] + selected_months]
                     df_filtered_sim2.to_excel(writer, sheet_name="Simulation_2", index=False)
 
-                    comparatif_filtered = comparatif[["Référence fournisseur", "Référence produit", "Désignation", "Qté Sim 1", "Montant Sim 1", "Qté Sim 2", "Montant Sim 2"]]
+                    comparatif_filtered = comparatif[["Référence fournisseur", "Référence produit", "Désignation", "Qté Sim 1", "Qté Sim 2", "Montant Sim 2"]]
                     comparatif_filtered.to_excel(writer, sheet_name="Comparatif", index=False)
                 output.seek(0)
                 st.download_button("📥 Télécharger le fichier Excel", output, file_name="forecast_result_final.xlsx")
