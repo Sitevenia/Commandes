@@ -162,28 +162,14 @@ if uploaded_file:
 
                 st.dataframe(df_sim2[["Référence fournisseur", "Référence produit", "Désignation", "Qté Sim 2", "Montant Sim 2"]])
 
-                # Comparatif
-                st.subheader("📊 Comparatif")
-                comparatif = df[["Référence fournisseur", "Référence produit", "Désignation"]].copy()
-                comparatif["Qté Sim 1"] = df["Qté Sim 1"]
-                comparatif["Qté Sim 2"] = df_sim2["Qté Sim 2"]
-                comparatif["Montant Sim 2"] = df_sim2["Montant Sim 2"]
-                st.dataframe(comparatif)
-
-                # Export Excel
-                output = io.BytesIO()
-                with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
+                # Export Simulation 2
+                output2 = io.BytesIO()
+                with pd.ExcelWriter(output2, engine="xlsxwriter") as writer:
                     # Filtrer les colonnes avant l'exportation
-                    df_filtered_sim1 = df[["Référence fournisseur", "Référence produit", "Désignation", "Qté Sim 1", "Montant Sim 1"] + selected_months]
-                    df_filtered_sim1.to_excel(writer, sheet_name="Simulation_1", index=False)
-
                     df_filtered_sim2 = df_sim2[["Référence fournisseur", "Référence produit", "Désignation", "Qté Sim 2", "Montant Sim 2"] + selected_months]
                     df_filtered_sim2.to_excel(writer, sheet_name="Simulation_2", index=False)
-
-                    comparatif_filtered = comparatif[["Référence fournisseur", "Référence produit", "Désignation", "Qté Sim 1", "Qté Sim 2", "Montant Sim 2"]]
-                    comparatif_filtered.to_excel(writer, sheet_name="Comparatif", index=False)
-                output.seek(0)
-                st.download_button("📥 Télécharger le fichier Excel", output, file_name="forecast_result_final.xlsx")
+                output2.seek(0)
+                st.download_button("📥 Télécharger Simulation 2", output2, file_name="simulation_2.xlsx")
 
     except Exception as e:
         st.error(f"❌ Erreur : {e}")
