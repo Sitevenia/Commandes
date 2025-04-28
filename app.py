@@ -78,6 +78,9 @@ if uploaded_file:
         # Calculer la colonne "Total"
         df["Total"] = df["Tarif d'achat"] * df["Quantité à commander"]
 
+        # Calculer la colonne "Stock à terme"
+        df["Stock à terme"] = df["Stock"] + df["Quantité à commander"]
+
         # Vérifier si les colonnes nécessaires existent
         required_columns = ["AF_RefFourniss", "Référence Article", "Désignation Article", "Stock"]
         missing_columns = [col for col in required_columns if col not in df.columns]
@@ -86,7 +89,7 @@ if uploaded_file:
             st.error(f"❌ Colonnes manquantes dans le fichier : {missing_columns}")
         else:
             # Organiser l'ordre des colonnes pour l'affichage et l'exportation
-            display_columns = required_columns + ["Ventes N-1", "Ventes 12 semaines identiques N-1", "Ventes 12 dernières semaines", "Conditionnement", "Quantité à commander", "Tarif d'achat", "Total"]
+            display_columns = required_columns + ["Ventes N-1", "Ventes 12 semaines identiques N-1", "Ventes 12 dernières semaines", "Conditionnement", "Quantité à commander", "Stock à terme", "Tarif d'achat", "Total"]
 
             # Ajouter une ligne de total en bas du tableau
             total_row = pd.DataFrame(df[["Total"]].sum()).T
