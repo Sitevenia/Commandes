@@ -88,19 +88,19 @@ if uploaded_file:
         if missing_columns:
             st.error(f"❌ Colonnes manquantes dans le fichier : {missing_columns}")
         else:
-            # Organiser l'ordre des colonnes pour l'affichage et l'exportation
+            # Organiser l'ordre des colonnes pour l'affichage
             display_columns = required_columns + ["Ventes N-1", "Ventes 12 semaines identiques N-1", "Ventes 12 dernières semaines", "Conditionnement", "Quantité à commander", "Stock à terme", "Tarif d'achat", "Total"]
 
-            # Filtrer les produits pour lesquels il y a des quantités à commander
-            df_filtered = df[df["Quantité à commander"] > 0]
+            st.subheader("Quantités à commander pour les 3 prochaines semaines")
+            st.dataframe(df[display_columns])
 
-            # Ajouter une ligne de total en bas du tableau
+            # Filtrer les produits pour lesquels il y a des quantités à commander pour l'exportation
+            df_filtered = df[df["Quantité à commander"] > 0].copy()
+
+            # Ajouter une ligne de total en bas du tableau filtré
             total_row = pd.DataFrame(df_filtered[["Total"]].sum()).T
             total_row.index = ["Total"]
             df_with_total = pd.concat([df_filtered[display_columns], total_row], ignore_index=False)
-
-            st.subheader("Quantités à commander pour les 3 prochaines semaines")
-            st.dataframe(df_with_total)
 
             # Export des quantités à commander
             output = io.BytesIO()
