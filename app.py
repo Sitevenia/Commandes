@@ -3,7 +3,7 @@ import pandas as pd
 import numpy as np
 import io
 
-def calculer_quantite_a_commander(df, semaine_columns):
+def calculer_quantite_a_commander(df, semaine_columns, montant_minimum):
     """Calcule la quantité à commander en fonction des critères donnés."""
     # Calculer la moyenne des ventes sur la totalité des colonnes (Ventes N-1)
     ventes_N1 = df[semaine_columns].sum(axis=1)
@@ -25,6 +25,18 @@ def calculer_quantite_a_commander(df, semaine_columns):
     conditionnement = df["Conditionnement"]
     quantite_a_commander = [int(np.ceil(q / cond) * cond) for q, cond in zip(quantite_a_commander, conditionnement)]
 
+    # Calculer le montant total initial
+    montant_total_initial = (df["Tarif d'achat"] * quantite_a_commander).sum()
+
+    # Si le montant minimum est supérieur au montant calculé, ajuster les quantités
+    if montant_minimum > 0 and montant_total_initial < montant_minimum:
+        while montant_total_initial < montant_minimum:
+            for i in range(len(quantite_a_commander)):
+                quantite_a_commander[i] += conditionnement[i]
+                montant_total_initial = (df["Tarif d'achat"] * quantite_a_commander).sum()
+                if montant_total_initial >= montant_minimum:
+                    break
+
     return quantite_a_commander, ventes_N1, ventes_12_semaines_N1, ventes_12_dernieres_semaines
 
 st.set_page_config(page_title="Forecast App", layout="wide")
@@ -39,61 +51,56 @@ if uploaded_file:
         df = pd.read_excel(uploaded_file, sheet_name="Tableau final", header=7)
         st.success("✅ Fichier principal chargé avec succès.")
 
-        # Utiliser la colonne "202401" comme point de départ
-        start_column = "202401"
-        if start_column in df.columns:
-            start_index = df.columns.get_loc(start_column)
+        # Utiliser la colonne 13 comme point de départ
+        start_index = 13  # Colonne "N"
+
+        # Sélectionner toutes les colonnes numériques à partir de la colonne 13
+        semaine_columns = df.columns[start_index:].tolist()
+        numeric_columns = df[semaine_columns].select_dtypes(include=[np.number]).columns.tolist()
+
+        exclude_columns = ["Tarif d'achat", "Conditionnement", "Stock"]
+        semaine_columns = [col for col in numeric_columns if col not in exclude_columns]
+
+        for col in semaine_columns + exclude_columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
+
+        # Interface pour saisir le montant minimum de commande
+        montant_minimum = st.number_input("Montant minimum de commande (€)", value=0.0, step=100.0)
+
+        # Calculer la quantité à commander et les autres valeurs
+        df["Quantité à commander"], df["Ventes N-1"], df["Ventes 12 semaines identiques N-1"], df["Ventes 12 dernières semaines"] = \
+            calculer_quantite_a_commander(df, semaine_columns, montant_minimum)
+
+        # Ajouter la colonne "Tarif d'achat"
+        df["Tarif d'achat"] = df["Tarif d'achat"]
+
+        # Calculer la colonne "Total"
+        df["Total"] = df["Tarif d'achat"] * df["Quantité à commander"]
+
+        # Vérifier si les colonnes nécessaires existent
+        required_columns = ["AF_RefFourniss", "Référence Article", "Désignation Article", "Stock"]
+        missing_columns = [col for col in required_columns if col not in df.columns]
+
+        if missing_columns:
+            st.error(f"❌ Colonnes manquantes dans le fichier : {missing_columns}")
         else:
-            st.error(f"❌ Colonne '{start_column}' non trouvée dans le fichier.")
-            start_index = None
+            # Organiser l'ordre des colonnes pour l'affichage et l'exportation
+            display_columns = required_columns + ["Ventes N-1", "Ventes 12 semaines identiques N-1", "Ventes 12 dernières semaines", "Conditionnement", "Quantité à commander", "Tarif d'achat", "Total"]
 
-        if start_index is not None:
-            # Sélectionner toutes les colonnes numériques à partir de "202401"
-            semaine_columns = df.columns[start_index:].tolist()
-            numeric_columns = df[semaine_columns].select_dtypes(include=[np.number]).columns.tolist()
+            # Ajouter une ligne de total en bas du tableau
+            total_row = pd.DataFrame(df[["Total"]].sum()).T
+            total_row.index = ["Total"]
+            df_with_total = pd.concat([df[display_columns], total_row], ignore_index=False)
 
-            exclude_columns = ["Tarif d'achat", "Conditionnement", "Stock"]
-            semaine_columns = [col for col in numeric_columns if col not in exclude_columns]
+            st.subheader("Quantités à commander pour les 3 prochaines semaines")
+            st.dataframe(df_with_total)
 
-            for col in semaine_columns + exclude_columns:
-                df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
-
-            # Calculer la quantité à commander et les autres valeurs
-            df["Quantité à commander"], df["Ventes N-1"], df["Ventes 12 semaines identiques N-1"], df["Ventes 12 dernières semaines"] = \
-                calculer_quantite_a_commander(df, semaine_columns)
-
-            # Ajouter la colonne "Tarif d'achat"
-            df["Tarif d'achat"] = df["Tarif d'achat"]
-
-            # Calculer la colonne "Total"
-            df["Total"] = df["Tarif d'achat"] * df["Quantité à commander"]
-
-            # Vérifier si les colonnes nécessaires existent
-            required_columns = ["AF_RefFourniss", "Référence Article", "Désignation Article", "Stock"]
-            missing_columns = [col for col in required_columns if col not in df.columns]
-
-            if missing_columns:
-                st.error(f"❌ Colonnes manquantes dans le fichier : {missing_columns}")
-            else:
-                # Organiser l'ordre des colonnes pour l'affichage et l'exportation
-                display_columns = required_columns + ["Ventes N-1", "Ventes 12 semaines identiques N-1", "Ventes 12 dernières semaines", "Conditionnement", "Quantité à commander", "Tarif d'achat", "Total"]
-
-                # Ajouter une ligne de total en bas du tableau
-                total_row = pd.DataFrame(df[["Total"]].sum()).T
-                total_row.index = ["Total"]
-                df_with_total = pd.concat([df[display_columns], total_row], ignore_index=False)
-
-                st.subheader("Quantités à commander pour les 3 prochaines semaines")
-                st.dataframe(df_with_total)
-
-                # Export des quantités à commander
-                output = io.BytesIO()
-                with pd.ExcelWriter(output, engine="openpyxl") as writer:
-                    df_with_total.to_excel(writer, sheet_name="Quantités_à_commander", index=False)
-                output.seek(0)
-                st.download_button("📥 Télécharger Quantités à commander", output, file_name="quantites_a_commander.xlsx")
-        else:
-            st.error("❌ Impossible de trouver la colonne de départ.")
+            # Export des quantités à commander
+            output = io.BytesIO()
+            with pd.ExcelWriter(output, engine="openpyxl") as writer:
+                df_with_total.to_excel(writer, sheet_name="Quantités_à_commander", index=False)
+            output.seek(0)
+            st.download_button("📥 Télécharger Quantités à commander", output, file_name="quantites_a_commander.xlsx")
 
     except Exception as e:
         st.error(f"❌ Erreur : {e}")
