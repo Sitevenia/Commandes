@@ -5,17 +5,17 @@ import io
 
 def calculer_quantite_a_commander(df, semaine_columns):
     """Calcule la quantité à commander en fonction des critères donnés."""
-    # Calculer la moyenne des ventes sur la totalité des colonnes
-    moyenne_totale = df[semaine_columns].mean(axis=1)
+    # Calculer la moyenne des ventes sur la totalité des colonnes (Ventes N-1)
+    ventes_N1 = df[semaine_columns].sum(axis=1)
 
     # Calculer la moyenne des 12 dernières semaines
-    moyenne_12_dernieres_semaines = df[semaine_columns[-12:]].mean(axis=1)
+    ventes_12_dernieres_semaines = df[semaine_columns[-12:]].sum(axis=1)
 
     # Calculer la moyenne des 12 semaines identiques en N-1
-    moyenne_12_semaines_N1 = df[semaine_columns[:12]].mean(axis=1)
+    ventes_12_semaines_N1 = df[semaine_columns[-64:-52]].sum(axis=1)
 
     # Appliquer la pondération
-    quantite_ponderee = 0.7 * moyenne_12_dernieres_semaines + 0.3 * moyenne_12_semaines_N1
+    quantite_ponderee = 0.7 * (ventes_12_dernieres_semaines / 12) + 0.3 * (ventes_12_semaines_N1 / 12)
 
     # Calculer la quantité à commander pour les 3 prochaines semaines
     quantite_a_commander = (quantite_ponderee * 3) - df["Stock"]
@@ -25,7 +25,7 @@ def calculer_quantite_a_commander(df, semaine_columns):
     conditionnement = df["Conditionnement"]
     quantite_a_commander = [int(np.ceil(q / cond) * cond) for q, cond in zip(quantite_a_commander, conditionnement)]
 
-    return quantite_a_commander, moyenne_totale, moyenne_12_dernieres_semaines, moyenne_12_semaines_N1
+    return quantite_a_commander, ventes_N1, ventes_12_semaines_N1, ventes_12_dernieres_semaines
 
 st.set_page_config(page_title="Forecast App", layout="wide")
 st.title("📦 Application de Prévision des Commandes")
