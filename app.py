@@ -23,7 +23,7 @@ def calculer_quantite_a_commander(df, semaine_columns):
 
     # Ajuster les quantités à commander pour qu'elles soient des multiples entiers des conditionnements
     conditionnement = df["Conditionnement"]
-    quantite_a_commander = quantite_a_commander.apply(lambda x, cond: int(np.ceil(x / cond) * cond), args=(conditionnement,))
+    quantite_a_commander = [int(np.ceil(q / cond) * cond) for q, cond in zip(quantite_a_commander, conditionnement)]
 
     return quantite_a_commander
 
