@@ -53,8 +53,11 @@ uploaded_file = st.file_uploader("📁 Charger le fichier Excel principal", type
 if uploaded_file:
     try:
         # Lire le fichier Excel en utilisant la ligne 8 comme en-tête
-        df = pd.read_excel(uploaded_file, sheet_name="Tableau final", header=8)
+        df = pd.read_excel(uploaded_file, sheet_name="Tableau final", header=7)
         st.success("✅ Fichier principal chargé avec succès.")
+
+        # Afficher les noms des colonnes pour vérification
+        st.write("Noms des colonnes :", df.columns.tolist())
 
         # Trouver l'index de la colonne "202401"
         start_column = "202401"
