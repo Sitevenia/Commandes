@@ -25,7 +25,7 @@ def calculer_quantite_a_commander(df, semaine_columns):
     conditionnement = df["Conditionnement"]
     quantite_a_commander = [int(np.ceil(q / cond) * cond) for q, cond in zip(quantite_a_commander, conditionnement)]
 
-    return quantite_a_commander
+    return quantite_a_commander, moyenne_totale, moyenne_12_dernieres_semaines, moyenne_12_semaines_N1
 
 st.set_page_config(page_title="Forecast App", layout="wide")
 st.title("📦 Application de Prévision des Commandes")
@@ -52,23 +52,25 @@ if uploaded_file:
         for col in semaine_columns + exclude_columns:
             df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
 
-        # Calculer la quantité à commander
-        df["Quantité à commander"] = calculer_quantite_a_commander(df, semaine_columns)
+        # Calculer la quantité à commander et les autres valeurs
+        df["Quantité à commander"], df["Ventes N-1"], df["Ventes 12 semaines identiques N-1"], df["Ventes 12 dernières semaines"] = \
+            calculer_quantite_a_commander(df, semaine_columns)
 
         # Vérifier si les colonnes nécessaires existent
-        required_columns = ["AF_RefFourniss", "Référence Article", "Désignation Article"]
+        required_columns = ["AF_RefFourniss", "Référence Article", "Désignation Article", "Stock"]
         missing_columns = [col for col in required_columns if col not in df.columns]
 
         if missing_columns:
             st.error(f"❌ Colonnes manquantes dans le fichier : {missing_columns}")
         else:
             st.subheader("Quantités à commander pour les 3 prochaines semaines")
-            st.dataframe(df[required_columns + ["Quantité à commander"]])
+            st.dataframe(df[required_columns + ["Ventes N-1", "Ventes 12 semaines identiques N-1", "Ventes 12 dernières semaines", "Quantité à commander"]])
 
             # Export des quantités à commander
             output = io.BytesIO()
             with pd.ExcelWriter(output, engine="openpyxl") as writer:
-                df[required_columns + ["Quantité à commander"]].to_excel(writer, sheet_name="Quantités_à_commander", index=False)
+                df[required_columns + ["Ventes N-1", "Ventes 12 semaines identiques N-1", "Ventes 12 dernières semaines", "Quantité à commander"]].to_excel(
+                    writer, sheet_name="Quantités_à_commander", index=False)
             output.seek(0)
             st.download_button("📥 Télécharger Quantités à commander", output, file_name="quantites_a_commander.xlsx")
 
