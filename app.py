@@ -51,15 +51,22 @@ if uploaded_file:
         # Calculer la quantité à commander
         df["Quantité à commander"] = calculer_quantite_a_commander(df, semaine_columns)
 
-        st.subheader("Quantités à commander pour les 3 prochaines semaines")
-        st.dataframe(df[["Référence fournisseur", "Référence produit", "Désignation", "Quantité à commander"]])
+        # Vérifier si les colonnes nécessaires existent
+        required_columns = ["AF_RefFourniss", "Référence Article", "Désignation Article"]
+        missing_columns = [col for col in required_columns if col not in df.columns]
 
-        # Export des quantités à commander
-        output = io.BytesIO()
-        with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
-            df[["Référence fournisseur", "Référence produit", "Désignation", "Quantité à commander"]].to_excel(writer, sheet_name="Quantités_à_commander", index=False)
-        output.seek(0)
-        st.download_button("📥 Télécharger Quantités à commander", output, file_name="quantites_a_commander.xlsx")
+        if missing_columns:
+            st.error(f"❌ Colonnes manquantes dans le fichier : {missing_columns}")
+        else:
+            st.subheader("Quantités à commander pour les 3 prochaines semaines")
+            st.dataframe(df[required_columns + ["Quantité à commander"]])
+
+            # Export des quantités à commander
+            output = io.BytesIO()
+            with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
+                df[required_columns + ["Quantité à commander"]].to_excel(writer, sheet_name="Quantités_à_commander", index=False)
+            output.seek(0)
+            st.download_button("📥 Télécharger Quantités à commander", output, file_name="quantites_a_commander.xlsx")
 
     except Exception as e:
         st.error(f"❌ Erreur : {e}")
