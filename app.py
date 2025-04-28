@@ -56,6 +56,12 @@ if uploaded_file:
         df["Quantité à commander"], df["Ventes N-1"], df["Ventes 12 semaines identiques N-1"], df["Ventes 12 dernières semaines"] = \
             calculer_quantite_a_commander(df, semaine_columns)
 
+        # Ajouter la colonne "Tarif d'achat"
+        df["Tarif d'achat"] = df["Tarif d'achat"]
+
+        # Calculer la colonne "Total"
+        df["Total"] = df["Tarif d'achat"] * df["Quantité à commander"]
+
         # Vérifier si les colonnes nécessaires existent
         required_columns = ["AF_RefFourniss", "Référence Article", "Désignation Article", "Stock"]
         missing_columns = [col for col in required_columns if col not in df.columns]
@@ -64,15 +70,20 @@ if uploaded_file:
             st.error(f"❌ Colonnes manquantes dans le fichier : {missing_columns}")
         else:
             # Organiser l'ordre des colonnes pour l'affichage et l'exportation
-            display_columns = required_columns + ["Ventes N-1", "Ventes 12 semaines identiques N-1", "Ventes 12 dernières semaines", "Conditionnement", "Quantité à commander"]
+            display_columns = required_columns + ["Ventes N-1", "Ventes 12 semaines identiques N-1", "Ventes 12 dernières semaines", "Conditionnement", "Quantité à commander", "Tarif d'achat", "Total"]
+
+            # Ajouter une ligne de total en bas du tableau
+            total_row = pd.DataFrame(df[["Total"]].sum()).T
+            total_row.index = ["Total"]
+            df_with_total = pd.concat([df[display_columns], total_row], ignore_index=False)
 
             st.subheader("Quantités à commander pour les 3 prochaines semaines")
-            st.dataframe(df[display_columns])
+            st.dataframe(df_with_total)
 
             # Export des quantités à commander
             output = io.BytesIO()
             with pd.ExcelWriter(output, engine="openpyxl") as writer:
-                df[display_columns].to_excel(writer, sheet_name="Quantités_à_commander", index=False)
+                df_with_total.to_excel(writer, sheet_name="Quantités_à_commander", index=False)
             output.seek(0)
             st.download_button("📥 Télécharger Quantités à commander", output, file_name="quantites_a_commander.xlsx")
 
