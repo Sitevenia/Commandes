@@ -29,9 +29,9 @@ def calculer_quantite_a_commander(df, semaine_columns, montant_minimum):
     montant_total_initial = (df["Tarif d'achat"] * quantite_a_commander).sum()
 
     # Si le montant minimum est supérieur au montant calculé, ajuster les quantités
-    if montant_minimum > 0 and montant_minimum > montant_total_initial:
-        for i in range(len(quantite_a_commander)):
-            while montant_total_initial < montant_minimum:
+    if montant_minimum > 0 and montant_total_initial < montant_minimum:
+        while montant_total_initial < montant_minimum:
+            for i in range(len(quantite_a_commander)):
                 quantite_a_commander[i] += conditionnement[i]
                 montant_total_initial = (df["Tarif d'achat"] * quantite_a_commander).sum()
                 if montant_total_initial >= montant_minimum:
