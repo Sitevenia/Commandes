@@ -3,16 +3,29 @@ import pandas as pd
 import numpy as np
 import io
 
+def ajustement_commandes_exceptionnelles(df, semaine_columns):
+    """Ajuste les valeurs exceptionnelles dans les ventes."""
+    # Calculer la moyenne des ventes hebdomadaires sur l'ensemble des colonnes
+    moyenne_hebdo = df[semaine_columns].mean(axis=1)
+
+    # Remplacer les valeurs exceptionnelles par la moyenne hebdomadaire
+    df_ajuste = df[semaine_columns].apply(lambda row: row.apply(lambda x: moyenne_hebdo if x > 3 * moyenne_hebdo else x), axis=1)
+
+    return df_ajuste
+
 def calculer_quantite_a_commander(df, semaine_columns):
     """Calcule la quantité à commander en fonction des critères donnés."""
+    # Ajuster les valeurs exceptionnelles
+    df_ajuste = ajustement_commandes_exceptionnelles(df, semaine_columns)
+
     # Calculer la moyenne des ventes sur la totalité des colonnes (Ventes N-1)
-    ventes_N1 = df[semaine_columns].sum(axis=1)
+    ventes_N1 = df_ajuste.sum(axis=1)
 
     # Calculer la moyenne des 12 dernières semaines
-    ventes_12_dernieres_semaines = df[semaine_columns[-12:]].sum(axis=1)
+    ventes_12_dernieres_semaines = df_ajuste[semaine_columns[-12:]].sum(axis=1)
 
     # Calculer la moyenne des 12 semaines identiques en N-1
-    ventes_12_semaines_N1 = df[semaine_columns[-64:-52]].sum(axis=1)
+    ventes_12_semaines_N1 = df_ajuste[semaine_columns[-64:-52]].sum(axis=1)
 
     # Appliquer la pondération
     quantite_ponderee = 0.7 * (ventes_12_dernieres_semaines / 12) + 0.3 * (ventes_12_semaines_N1 / 12)
