@@ -63,14 +63,16 @@ if uploaded_file:
         if missing_columns:
             st.error(f"❌ Colonnes manquantes dans le fichier : {missing_columns}")
         else:
+            # Organiser l'ordre des colonnes pour l'affichage et l'exportation
+            display_columns = required_columns + ["Ventes N-1", "Ventes 12 semaines identiques N-1", "Ventes 12 dernières semaines", "Conditionnement", "Quantité à commander"]
+
             st.subheader("Quantités à commander pour les 3 prochaines semaines")
-            st.dataframe(df[required_columns + ["Ventes N-1", "Ventes 12 semaines identiques N-1", "Ventes 12 dernières semaines", "Quantité à commander"]])
+            st.dataframe(df[display_columns])
 
             # Export des quantités à commander
             output = io.BytesIO()
             with pd.ExcelWriter(output, engine="openpyxl") as writer:
-                df[required_columns + ["Ventes N-1", "Ventes 12 semaines identiques N-1", "Ventes 12 dernières semaines", "Quantité à commander"]].to_excel(
-                    writer, sheet_name="Quantités_à_commander", index=False)
+                df[display_columns].to_excel(writer, sheet_name="Quantités_à_commander", index=False)
             output.seek(0)
             st.download_button("📥 Télécharger Quantités à commander", output, file_name="quantites_a_commander.xlsx")
 
