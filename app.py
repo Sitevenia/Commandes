@@ -3,7 +3,7 @@ import pandas as pd
 import numpy as np
 import io
 
-def calculer_quantite_a_commander(df, semaine_columns, montant_minimum):
+def calculer_quantite_a_commander(df, semaine_columns):
     """Calcule la quantité à commander en fonction des critères donnés."""
     # Calculer la moyenne des ventes sur la totalité des colonnes (Ventes N-1)
     ventes_N1 = df[semaine_columns].sum(axis=1)
@@ -25,18 +25,6 @@ def calculer_quantite_a_commander(df, semaine_columns, montant_minimum):
     conditionnement = df["Conditionnement"]
     quantite_a_commander = [int(np.ceil(q / cond) * cond) for q, cond in zip(quantite_a_commander, conditionnement)]
 
-    # Calculer le montant total initial
-    montant_total_initial = (df["Tarif d'achat"] * quantite_a_commander).sum()
-
-    # Si le montant minimum est supérieur au montant calculé, ajuster les quantités
-    if montant_minimum > 0 and montant_total_initial < montant_minimum:
-        while montant_total_initial < montant_minimum:
-            for i in range(len(quantite_a_commander)):
-                quantite_a_commander[i] += conditionnement[i]
-                montant_total_initial = (df["Tarif d'achat"] * quantite_a_commander).sum()
-                if montant_total_initial >= montant_minimum:
-                    break
-
     return quantite_a_commander, ventes_N1, ventes_12_semaines_N1, ventes_12_dernieres_semaines
 
 st.set_page_config(page_title="Forecast App", layout="wide")
@@ -50,9 +38,6 @@ if uploaded_file:
         # Lire le fichier Excel en utilisant la ligne 8 comme en-tête
         df = pd.read_excel(uploaded_file, sheet_name="Tableau final", header=7)
         st.success("✅ Fichier principal chargé avec succès.")
-
-        # Afficher les noms des colonnes pour vérification
-        st.write("Noms des colonnes :", df.columns.tolist())
 
         # Utiliser la colonne "202401" comme point de départ
         start_column = "202401"
@@ -73,12 +58,9 @@ if uploaded_file:
             for col in semaine_columns + exclude_columns:
                 df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
 
-            # Interface pour saisir le montant minimum de commande
-            montant_minimum = st.number_input("Montant minimum de commande (€)", value=0.0, step=100.0)
-
             # Calculer la quantité à commander et les autres valeurs
             df["Quantité à commander"], df["Ventes N-1"], df["Ventes 12 semaines identiques N-1"], df["Ventes 12 dernières semaines"] = \
-                calculer_quantite_a_commander(df, semaine_columns, montant_minimum)
+                calculer_quantite_a_commander(df, semaine_columns)
 
             # Ajouter la colonne "Tarif d'achat"
             df["Tarif d'achat"] = df["Tarif d'achat"]
