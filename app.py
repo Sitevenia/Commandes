@@ -69,9 +69,6 @@ if uploaded_file:
         df["Quantité à commander"], df["Ventes N-1"], df["Ventes 12 semaines identiques N-1"], df["Ventes 12 dernières semaines"] = \
             calculer_quantite_a_commander(df, semaine_columns)
 
-        # Ajouter la colonne "Tarif d'achat"
-        df["Tarif d'achat"] = df["Tarif d'achat"]
-
         # Vérifier si les colonnes nécessaires existent
         required_columns = ["AF_RefFourniss", "Référence Article", "Désignation Article", "Stock"]
         missing_columns = [col for col in required_columns if col not in df.columns]
@@ -80,7 +77,7 @@ if uploaded_file:
             st.error(f"❌ Colonnes manquantes dans le fichier : {missing_columns}")
         else:
             # Organiser l'ordre des colonnes pour l'affichage et l'exportation
-            display_columns = required_columns + ["Ventes N-1", "Ventes 12 semaines identiques N-1", "Ventes 12 dernières semaines", "Conditionnement", "Quantité à commander", "Tarif d'achat"]
+            display_columns = required_columns + ["Ventes N-1", "Ventes 12 semaines identiques N-1", "Ventes 12 dernières semaines", "Conditionnement", "Quantité à commander"]
 
             st.subheader("Quantités à commander pour les 3 prochaines semaines")
             st.dataframe(df[display_columns])
