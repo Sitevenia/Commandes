@@ -21,6 +21,10 @@ def calculer_quantite_a_commander(df, semaine_columns):
     quantite_a_commander = (quantite_ponderee * 3) - df["Stock"]
     quantite_a_commander = quantite_a_commander.apply(lambda x: max(0, x))  # Ne pas commander des quantités négatives
 
+    # Ajuster les quantités à commander pour qu'elles soient des multiples entiers des conditionnements
+    conditionnement = df["Conditionnement"]
+    quantite_a_commander = quantite_a_commander.apply(lambda x, cond: int(np.ceil(x / cond) * cond), args=(conditionnement,))
+
     return quantite_a_commander
 
 st.set_page_config(page_title="Forecast App", layout="wide")
