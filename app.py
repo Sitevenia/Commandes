@@ -86,7 +86,8 @@ if uploaded_file:
             display_columns = required_columns + ["Ventes N-1", "Ventes 12 semaines identiques N-1", "Ventes 12 dernières semaines", "Conditionnement", "Quantité à commander", "Tarif d'achat", "Total"]
 
             # Ajouter une ligne de total en bas du tableau
-            total_row = pd.DataFrame(df[["Total"]].sum(), index=["Total"]).T
+            total_row = pd.DataFrame(df[["Total"]].sum()).T
+            total_row.index = ["Total"]
             df_with_total = pd.concat([df[display_columns], total_row], ignore_index=False)
 
             st.subheader("Quantités à commander pour les 3 prochaines semaines")
