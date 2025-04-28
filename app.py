@@ -23,7 +23,7 @@ def calculer_quantite_a_commander(df, semaine_columns, montant_minimum):
 
     # Ajuster les quantités à commander pour qu'elles soient des multiples entiers des conditionnements
     conditionnement = df["Conditionnement"]
-    quantite_a_commander = [int(np.ceil(q / cond) * cond) for q, cond in zip(quantite_a_commander, conditionnement)]
+    quantite_a_commander = [int(np.ceil(q / cond) * cond) if q > 0 else 0 for q, cond in zip(quantite_a_commander, conditionnement)]
 
     # Calculer le montant total initial
     montant_total_initial = (df["Tarif d'achat"] * quantite_a_commander).sum()
@@ -32,10 +32,11 @@ def calculer_quantite_a_commander(df, semaine_columns, montant_minimum):
     if montant_minimum > 0 and montant_total_initial < montant_minimum:
         while montant_total_initial < montant_minimum:
             for i in range(len(quantite_a_commander)):
-                quantite_a_commander[i] += conditionnement[i]
-                montant_total_initial = (df["Tarif d'achat"] * quantite_a_commander).sum()
-                if montant_total_initial >= montant_minimum:
-                    break
+                if quantite_a_commander[i] > 0:  # Augmenter seulement si une quantité est déjà commandée
+                    quantite_a_commander[i] += conditionnement[i]
+                    montant_total_initial = (df["Tarif d'achat"] * quantite_a_commander).sum()
+                    if montant_total_initial >= montant_minimum:
+                        break
 
     return quantite_a_commander, ventes_N1, ventes_12_semaines_N1, ventes_12_dernieres_semaines
 
