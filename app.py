@@ -67,7 +67,7 @@ if uploaded_file:
 
             # Export des quantités à commander
             output = io.BytesIO()
-            with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
+            with pd.ExcelWriter(output, engine="openpyxl") as writer:
                 df[required_columns + ["Quantité à commander"]].to_excel(writer, sheet_name="Quantités_à_commander", index=False)
             output.seek(0)
             st.download_button("📥 Télécharger Quantités à commander", output, file_name="quantites_a_commander.xlsx")
