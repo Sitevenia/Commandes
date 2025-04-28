@@ -51,6 +51,9 @@ if uploaded_file:
         df = pd.read_excel(uploaded_file, sheet_name="Tableau final", header=7)
         st.success("✅ Fichier principal chargé avec succès.")
 
+        # Afficher les noms des colonnes pour vérification
+        st.write("Noms des colonnes :", df.columns.tolist())
+
         # Utiliser la colonne "202401" comme point de départ
         start_column = "202401"
         if start_column in df.columns:
