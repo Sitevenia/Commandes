@@ -38,7 +38,7 @@ def calculer_quantite_a_commander(df, semaine_columns, montant_minimum, duree_se
                     if montant_total_initial >= montant_minimum:
                         break
 
-    return quantite_a_commander, ventes_N1, ventes_12_semaines_N1, ventes_12_dernieres_semaines
+    return quantite_a_commander, ventes_N1, ventes_12_semaines_N1, ventes_12_dernieres_semaines, montant_total_initial
 
 st.set_page_config(page_title="Forecast App", layout="wide")
 st.title("📦 Application de Prévision des Commandes")
@@ -72,7 +72,7 @@ if uploaded_file:
         montant_minimum = st.number_input("Montant minimum de commande (€)", value=0.0, step=100.0)
 
         # Calculer la quantité à commander et les autres valeurs
-        df["Quantité à commander"], df["Ventes N-1"], df["Ventes 12 semaines identiques N-1"], df["Ventes 12 dernières semaines"] = \
+        df["Quantité à commander"], df["Ventes N-1"], df["Ventes 12 semaines identiques N-1"], df["Ventes 12 dernières semaines"], montant_total = \
             calculer_quantite_a_commander(df, semaine_columns, montant_minimum, duree_semaines)
 
         # Ajouter la colonne "Tarif d'achat"
@@ -93,6 +93,9 @@ if uploaded_file:
         else:
             # Organiser l'ordre des colonnes pour l'affichage
             display_columns = required_columns + ["Ventes N-1", "Ventes 12 semaines identiques N-1", "Ventes 12 dernières semaines", "Conditionnement", "Quantité à commander", "Stock à terme", "Tarif d'achat", "Total"]
+
+            # Afficher le montant total de la commande
+            st.metric(label="Montant total de la commande", value=f"{montant_total:.2f} €")
 
             st.subheader("Quantités à commander pour les prochaines semaines")
             st.dataframe(df[display_columns])
