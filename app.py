@@ -65,11 +65,11 @@ if uploaded_file:
         for col in semaine_columns + exclude_columns:
             df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
 
-        # Interface pour saisir le montant minimum de commande
-        montant_minimum = st.number_input("Montant minimum de commande (€)", value=0.0, step=100.0)
-
         # Interface pour saisir la durée en semaines
         duree_semaines = st.number_input("Durée en semaines pour la commande", value=3, min_value=1, step=1)
+
+        # Interface pour saisir le montant minimum de commande
+        montant_minimum = st.number_input("Montant minimum de commande (€)", value=0.0, step=100.0)
 
         # Calculer la quantité à commander et les autres valeurs
         df["Quantité à commander"], df["Ventes N-1"], df["Ventes 12 semaines identiques N-1"], df["Ventes 12 dernières semaines"] = \
