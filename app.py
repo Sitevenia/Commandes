@@ -25,10 +25,10 @@ def calculer_quantite_a_commander(df, semaine_columns, montant_minimum, duree_se
     conditionnement = df["Conditionnement"]
     quantite_a_commander = [int(np.ceil(q / cond) * cond) if q > 0 else 0 for q, cond in zip(quantite_a_commander, conditionnement)]
 
-    # Vérifier si un produit est vendu au moins deux fois sur les 12 dernières semaines
+    # Vérifier si un produit est vendu au moins deux fois sur les 12 dernières semaines et si le stock est inférieur ou égal à 1
     for i in range(len(quantite_a_commander)):
         ventes_recentes = df[semaine_columns[-12:]].iloc[i]
-        if (ventes_recentes > 0).sum() >= 2:
+        if (ventes_recentes > 0).sum() >= 2 and df["Stock"].iloc[i] <= 1:
             if quantite_a_commander[i] == 0:
                 quantite_a_commander[i] = conditionnement[i]
 
