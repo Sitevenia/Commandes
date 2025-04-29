@@ -34,9 +34,9 @@ def calculer_quantite_a_commander(df, semaine_columns, montant_minimum, duree_se
         if (ventes_recentes > 0).sum() >= 2 and df["Stock"].iloc[i] <= 1:
             quantite_a_commander[i] = max(quantite_a_commander[i], conditionnement[i])
 
-    # Vérifier si les quantités vendues en N-1 sont inférieures à 6 et si les ventes des 12 dernières semaines ne correspondent pas à la condition de vente régulière
+    # Vérifier si les quantités vendues en N-1 sont inférieures à 6 et si les ventes des 12 dernières semaines sont inférieures à 2
     for i in range(len(quantite_a_commander)):
-        if ventes_N1.iloc[i] < 6 and (ventes_12_dernieres_semaines.iloc[i] < 2 or df["Stock"].iloc[i] > 1):
+        if ventes_N1.iloc[i] < 6 and ventes_12_dernieres_semaines.iloc[i] < 2:
             quantite_a_commander[i] = 0
 
     # Calculer le montant total initial
