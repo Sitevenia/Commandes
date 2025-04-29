@@ -3,7 +3,7 @@ import pandas as pd
 import numpy as np
 import io
 
-def calculer_quantite_a_commander(df, semaine_columns, montant_minimum):
+def calculer_quantite_a_commander(df, semaine_columns, montant_minimum, duree_semaines):
     """Calcule la quantité à commander en fonction des critères donnés."""
     # Calculer la moyenne des ventes sur la totalité des colonnes (Ventes N-1)
     ventes_N1 = df[semaine_columns].sum(axis=1)
@@ -17,8 +17,8 @@ def calculer_quantite_a_commander(df, semaine_columns, montant_minimum):
     # Appliquer la pondération
     quantite_ponderee = 0.7 * (ventes_12_dernieres_semaines / 12) + 0.3 * (ventes_12_semaines_N1 / 12)
 
-    # Calculer la quantité à commander pour les 3 prochaines semaines
-    quantite_a_commander = (quantite_ponderee * 3) - df["Stock"]
+    # Calculer la quantité à commander pour la durée spécifiée
+    quantite_a_commander = (quantite_ponderee * duree_semaines) - df["Stock"]
     quantite_a_commander = quantite_a_commander.apply(lambda x: max(0, x))  # Ne pas commander des quantités négatives
 
     # Ajuster les quantités à commander pour qu'elles soient des multiples entiers des conditionnements
@@ -68,9 +68,12 @@ if uploaded_file:
         # Interface pour saisir le montant minimum de commande
         montant_minimum = st.number_input("Montant minimum de commande (€)", value=0.0, step=100.0)
 
+        # Interface pour saisir la durée en semaines
+        duree_semaines = st.number_input("Durée en semaines pour la commande", value=3, min_value=1, step=1)
+
         # Calculer la quantité à commander et les autres valeurs
         df["Quantité à commander"], df["Ventes N-1"], df["Ventes 12 semaines identiques N-1"], df["Ventes 12 dernières semaines"] = \
-            calculer_quantite_a_commander(df, semaine_columns, montant_minimum)
+            calculer_quantite_a_commander(df, semaine_columns, montant_minimum, duree_semaines)
 
         # Ajouter la colonne "Tarif d'achat"
         df["Tarif d'achat"] = df["Tarif d'achat"]
@@ -91,7 +94,7 @@ if uploaded_file:
             # Organiser l'ordre des colonnes pour l'affichage
             display_columns = required_columns + ["Ventes N-1", "Ventes 12 semaines identiques N-1", "Ventes 12 dernières semaines", "Conditionnement", "Quantité à commander", "Stock à terme", "Tarif d'achat", "Total"]
 
-            st.subheader("Quantités à commander pour les 3 prochaines semaines")
+            st.subheader("Quantités à commander pour les prochaines semaines")
             st.dataframe(df[display_columns])
 
             # Filtrer les produits pour lesquels il y a des quantités à commander pour l'exportation
