@@ -17,8 +17,11 @@ def calculer_quantite_a_commander(df, semaine_columns, montant_minimum, duree_se
     # Appliquer la pondération
     quantite_ponderee = 0.5 * (ventes_12_dernieres_semaines / 12) + 0.3 * (ventes_12_semaines_N1 / 12) + 0.2 * (ventes_N1 / len(semaine_columns))
 
-    # Calculer la quantité à commander pour la durée spécifiée
-    quantite_a_commander = (quantite_ponderee * duree_semaines) - df["Stock"]
+    # Calculer la quantité nécessaire pour couvrir les ventes pendant la durée spécifiée
+    quantite_necessaire = quantite_ponderee * duree_semaines
+
+    # Calculer la quantité à commander
+    quantite_a_commander = quantite_necessaire - df["Stock"]
     quantite_a_commander = quantite_a_commander.apply(lambda x: max(0, x))  # Ne pas commander des quantités négatives
 
     # Ajuster les quantités à commander pour qu'elles soient des multiples entiers des conditionnements
