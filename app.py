@@ -14,8 +14,11 @@ def calculer_quantite_a_commander(df, semaine_columns, montant_minimum, duree_se
     # Calculer la moyenne des 12 semaines identiques en N-1
     ventes_12_semaines_N1 = df[semaine_columns[-64:-52]].sum(axis=1)
 
+    # Calculer la moyenne des 12 semaines suivantes en N-1
+    ventes_12_semaines_N1_suivantes = df[semaine_columns[-52:-40]].sum(axis=1)
+
     # Appliquer la pondération
-    quantite_ponderee = 0.5 * (ventes_12_dernieres_semaines / 12) + 0.3 * (ventes_12_semaines_N1 / 12) + 0.2 * (ventes_N1 / len(semaine_columns))
+    quantite_ponderee = 0.5 * (ventes_12_dernieres_semaines / 12) + 0.2 * (ventes_12_semaines_N1 / 12) + 0.3 * (ventes_12_semaines_N1_suivantes / 12)
 
     # Calculer la quantité nécessaire pour couvrir les ventes pendant la durée spécifiée
     quantite_necessaire = quantite_ponderee * duree_semaines
