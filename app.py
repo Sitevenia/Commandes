@@ -32,8 +32,7 @@ def calculer_quantite_a_commander(df, semaine_columns, montant_minimum, duree_se
     for i in range(len(quantite_a_commander)):
         ventes_recentes = df[semaine_columns[-12:]].iloc[i]
         if (ventes_recentes > 0).sum() >= 2 and df["Stock"].iloc[i] <= 1:
-            if quantite_a_commander[i] == 0:
-                quantite_a_commander[i] = conditionnement[i]
+            quantite_a_commander[i] = max(quantite_a_commander[i], conditionnement[i])
 
     # Vérifier si les quantités vendues en N-1 sont inférieures à 6 et si les quantités vendues ne correspondent pas aux autres critères
     for i in range(len(quantite_a_commander)):
