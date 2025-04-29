@@ -25,6 +25,13 @@ def calculer_quantite_a_commander(df, semaine_columns, montant_minimum, duree_se
     conditionnement = df["Conditionnement"]
     quantite_a_commander = [int(np.ceil(q / cond) * cond) if q > 0 else 0 for q, cond in zip(quantite_a_commander, conditionnement)]
 
+    # Vérifier si un produit est vendu au moins une fois toutes les 4 semaines sur les 12 dernières semaines
+    for i in range(len(quantite_a_commander)):
+        ventes_recentes = df[semaine_columns[-12:]].iloc[i]
+        if any(ventes_recentes[j:j+4].sum() > 0 for j in range(0, len(ventes_recentes), 4)):
+            if quantite_a_commander[i] == 0:
+                quantite_a_commander[i] = conditionnement[i]
+
     # Calculer le montant total initial
     montant_total_initial = (df["Tarif d'achat"] * quantite_a_commander).sum()
 
