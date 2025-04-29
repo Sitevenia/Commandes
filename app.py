@@ -32,6 +32,12 @@ def calculer_quantite_a_commander(df, semaine_columns, montant_minimum, duree_se
             if quantite_a_commander[i] == 0:
                 quantite_a_commander[i] = conditionnement[i]
 
+    # Vérifier si les quantités vendues en N-1 sont inférieures à 6 et si les quantités vendues ne correspondent pas aux autres critères
+    for i in range(len(quantite_a_commander)):
+        if ventes_N1.iloc[i] < 6 and quantite_a_commander[i] == 0:
+            quantite_a_commander[i] = 0
+            df.at[i, "Stock"] = 0
+
     # Calculer le montant total initial
     montant_total_initial = (df["Tarif d'achat"] * quantite_a_commander).sum()
 
