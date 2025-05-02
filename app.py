@@ -19,8 +19,8 @@ if uploaded_file:
         df = pd.read_excel(uploaded_file, sheet_name="Tableau final", header=7)
         st.success("✅ Fichier principal chargé avec succès.")
 
-        # Extraire la liste des fournisseurs
-        fournisseurs = df["Nom du Fournisseur"].unique().tolist()  # Remplacez par le nom correct de la colonne
+        # Extraire la liste des fournisseurs à partir de la colonne "Fournisseur" (colonne B)
+        fournisseurs = df["Fournisseur"].unique().tolist()
 
         # Widget pour sélectionner les fournisseurs
         selected_fournisseurs = st.multiselect(
@@ -30,7 +30,7 @@ if uploaded_file:
         )
 
         # Filtrer les données en fonction des fournisseurs sélectionnés
-        df_filtered = df[df["Nom du Fournisseur"].isin(selected_fournisseurs)]
+        df_filtered = df[df["Fournisseur"].isin(selected_fournisseurs)]
 
         # Utiliser la colonne 13 comme point de départ
         start_index = 13  # Colonne "N"
