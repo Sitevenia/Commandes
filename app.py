@@ -66,7 +66,7 @@ def generer_rapport_excel(df, df_fournisseurs, montant_total):
         df_with_total.to_excel(writer, sheet_name="Quantités_à_commander", index=False)
 
         # Écrire les informations des fournisseurs
-        df_fournisseurs.to_excel(writer, sheet_name="Fournisseurs", index=False)
+        df_fournisseurs.to_excel(writer, sheet_name="Minimum de commande", index=False)
 
         # Ajouter une feuille pour les alertes
         alertes = []
@@ -98,6 +98,9 @@ if uploaded_file:
         # Lire le fichier Excel en utilisant la ligne 8 comme en-tête
         df = pd.read_excel(uploaded_file, sheet_name="Tableau final", header=7)
         st.success("✅ Fichier principal chargé avec succès.")
+
+        # Lire l'onglet "Minimum de commande"
+        df_fournisseurs = pd.read_excel(uploaded_file, sheet_name="Minimum de commande")
 
         # Utiliser la colonne 13 comme point de départ
         start_index = 13  # Colonne "N"
@@ -147,16 +150,11 @@ if uploaded_file:
             st.subheader("Quantités à commander pour les prochaines semaines")
             st.dataframe(df[display_columns])
 
-            # Charger le fichier des fournisseurs
-            uploaded_file_fournisseurs = st.file_uploader("📁 Charger le fichier Excel des fournisseurs", type=["xlsx"])
-            if uploaded_file_fournisseurs:
-                df_fournisseurs = pd.read_excel(uploaded_file_fournisseurs, sheet_name="Fournisseurs")
+            # Générer le rapport Excel
+            output = generer_rapport_excel(df[display_columns], df_fournisseurs, montant_total)
 
-                # Générer le rapport Excel
-                output = generer_rapport_excel(df[display_columns], df_fournisseurs, montant_total)
-
-                # Export des quantités à commander
-                st.download_button("📥 Télécharger Quantités à commander", output, file_name="quantites_a_commander.xlsx")
+            # Export des quantités à commander
+            st.download_button("📥 Télécharger Quantités à commander", output, file_name="quantites_a_commander.xlsx")
 
     except Exception as e:
         st.error(f"❌ Erreur : {e}")
