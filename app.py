@@ -79,9 +79,6 @@ if uploaded_file:
         df = pd.read_excel(uploaded_file, sheet_name="Tableau final", header=7)
         st.success("✅ Fichier principal chargé avec succès.")
 
-        # Lire l'onglet "Minimum de commande"
-        df_fournisseurs = pd.read_excel(uploaded_file, sheet_name="Minimum de commande")
-
         # Utiliser la colonne 13 comme point de départ
         start_index = 13  # Colonne "N"
 
@@ -124,31 +121,8 @@ if uploaded_file:
             # Organiser l'ordre des colonnes pour l'affichage
             display_columns = required_columns + ["Ventes N-1", "Ventes 12 semaines identiques N-1", "Ventes 12 dernières semaines", "Conditionnement", "Quantité à commander", "Stock à terme", "Tarif d'achat", "Total"]
 
-            # Calculer le montant total de la commande par fournisseur
-            montant_total_par_fournisseur = df.groupby("AF_RefFourniss")["Total"].sum()
-
             # Afficher le montant total de la commande
             st.metric(label="Montant total de la commande", value=f"{montant_total:.2f} €")
-
-            # Afficher les alertes pour les minimums de commande
-            alertes = []
-            for index, row in df_fournisseurs.iterrows():
-                if montant_total_par_fournisseur.get(row["AF_RefFourniss"], 0) < row["Montant minimum de commande"]:
-                    alertes.append({
-                        "Fournisseur": row["Fournisseur"],
-                        "Montant minimum": row["Montant minimum de commande"],
-                        "Montant commandé": montant_total_par_fournisseur.get(row["AF_RefFourniss"], 0),
-                        "Montant manquant": row["Montant minimum de commande"] - montant_total_par_fournisseur.get(row["AF_RefFourniss"], 0)
-                    })
-
-            if alertes:
-                st.error("🚨 Alertes de minimum de commande :")
-                for alerte in alertes:
-                    st.write(f"**Fournisseur :** {alerte['Fournisseur']}")
-                    st.write(f"**Montant minimum de commande :** {alerte['Montant minimum']} €")
-                    st.write(f"**Montant commandé :** {alerte['Montant commandé']} €")
-                    st.write(f"**Montant manquant :** {alerte['Montant manquant']} €")
-                    st.write("---")
 
             st.subheader("Quantités à commander pour les prochaines semaines")
             st.dataframe(df[display_columns])
