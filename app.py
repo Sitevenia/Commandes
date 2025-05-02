@@ -67,9 +67,10 @@ def generer_rapport_excel(df, df_fournisseurs, montant_total):
         # Ajouter une ligne pour le minimum de commande
         min_commande_info = df_fournisseurs.iloc[0]  # Supposons que nous prenons le premier fournisseur pour l'exemple
         min_commande_text = f"Minimum de commande : {min_commande_info['Montant minimum de commande']} €"
-        df_with_total.loc[-1] = ["", "", "", "", "", "", min_commande_text, ""]  # Ajouter une ligne vide pour le texte
-        df_with_total.index = df_with_total.index + 1  # Décaler l'index pour insérer la ligne
-        df_with_total.sort_index(inplace=True)
+        min_commande_row = pd.DataFrame([["", "", "", "", "", "", min_commande_text, ""]], columns=df.columns + ["Total"])
+
+        # Concaténer la ligne de minimum de commande avec les données
+        df_with_total = pd.concat([min_commande_row, df_with_total], ignore_index=True)
 
         df_with_total.to_excel(writer, sheet_name="Quantités_à_commander", index=False)
 
