@@ -216,7 +216,7 @@ if uploaded_file:
             logging.info("'Minimum de commande' sheet read.")
             # Process Minimum Order Data
             supplier_col_min = "Fournisseur" # Adjust if name is different
-            min_amount_col = "Minimum Commande €" # Adjust if name is different
+            min_amount_col = "Minimum de Commande" # Adjust if name is different
             required_min_cols = [supplier_col_min, min_amount_col]
 
             if all(col in df_min_commande.columns for col in required_min_cols):
