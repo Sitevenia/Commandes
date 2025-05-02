@@ -4,8 +4,59 @@ import numpy as np
 import io
 
 def calculer_quantite_a_commander(df, semaine_columns, montant_minimum, duree_semaines):
-    # (La fonction reste inchangée)
-    pass
+    """Calcule la quantité à commander en fonction des critères donnés."""
+    # Calculer la moyenne des ventes sur la totalité des colonnes (Ventes N-1)
+    ventes_N1 = df[semaine_columns].sum(axis=1)
+
+    # Calculer la moyenne des 12 dernières semaines
+    ventes_12_dernieres_semaines = df[semaine_columns[-12:]].sum(axis=1)
+
+    # Calculer la moyenne des 12 semaines identiques en N-1
+    ventes_12_semaines_N1 = df[semaine_columns[-64:-52]].sum(axis=1)
+
+    # Calculer la moyenne des 12 semaines suivantes en N-1
+    ventes_12_semaines_N1_suivantes = df[semaine_columns[-52:-40]].sum(axis=1)
+
+    # Appliquer la pondération
+    quantite_ponderee = 0.5 * (ventes_12_dernieres_semaines / 12) + 0.2 * (ventes_12_semaines_N1 / 12) + 0.3 * (ventes_12_semaines_N1_suivantes / 12)
+
+    # Calculer la quantité nécessaire pour couvrir les ventes pendant la durée spécifiée
+    quantite_necessaire = quantite_ponderee * duree_semaines
+
+    # Calculer la quantité à commander
+    quantite_a_commander = quantite_necessaire - df["Stock"]
+    quantite_a_commander = quantite_a_commander.apply(lambda x: max(0, x))  # Ne pas commander des quantités négatives
+
+    # Ajuster les quantités à commander pour qu'elles soient des multiples entiers des conditionnements
+    conditionnement = df["Conditionnement"]
+    quantite_a_commander = [int(np.ceil(q / cond) * cond) if q > 0 else 0 for q, cond in zip(quantite_a_commander, conditionnement)]
+
+    # Vérifier si un produit est vendu au moins deux fois sur les 12 dernières semaines et si le stock est inférieur ou égal à 1
+    for i in range(len(quantite_a_commander)):
+        ventes_recentes = df[semaine_columns[-12:]].iloc[i]
+        if (ventes_recentes > 0).sum() >= 2 and df["Stock"].iloc[i] <= 1:
+            quantite_a_commander[i] = max(quantite_a_commander[i], conditionnement[i])
+
+    # Vérifier si les quantités vendues en N-1 sont inférieures à 6 et si les ventes des 12 dernières semaines sont inférieures à 2
+    for i in range(len(quantite_a_commander)):
+        if ventes_N1.iloc[i] < 6 and ventes_12_dernieres_semaines.iloc[i] < 2:
+            quantite_a_commander[i] = 0
+
+    # Calculer le montant total initial
+    montant_total_initial = (df["Tarif d'achat"] * quantite_a_commander).sum()
+
+    # Si le montant minimum est supérieur au montant calculé, ajuster les quantités
+    if montant_minimum > 0 and montant_total_initial < montant_minimum:
+        while montant_total_initial < montant_minimum:
+            for i in range(len(quantite_a_commander)):
+                if quantite_a_commander[i] > 0:  # Augmenter seulement si une quantité est déjà commandée
+                    quantite_a_commander[i] += conditionnement[i]
+                    montant_total_initial = (df["Tarif d'achat"] * quantite_a_commander).sum()
+                    if montant_total_initial >= montant_minimum:
+                        break
+
+    # Retourner les valeurs sous forme de tuple
+    return quantite_a_commander, ventes_N1, ventes_12_semaines_N1, ventes_12_dernieres_semaines, montant_total_initial
 
 st.set_page_config(page_title="Forecast App", layout="wide")
 st.title("📦 Application de Prévision des Commandes")
@@ -18,6 +69,9 @@ if uploaded_file:
         # Lire le fichier Excel en utilisant la ligne 8 comme en-tête
         df = pd.read_excel(uploaded_file, sheet_name="Tableau final", header=7)
         st.success("✅ Fichier principal chargé avec succès.")
+
+        # Filtrer les lignes où le fournisseur n'est pas #FILTER
+        df = df[df["Fournisseur"] != "#FILTER"]
 
         # Extraire la liste des fournisseurs à partir de la colonne "Fournisseur" (colonne B)
         fournisseurs = df["Fournisseur"].unique().tolist()
