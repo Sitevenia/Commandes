@@ -57,26 +57,6 @@ def calculer_quantite_a_commander(df, semaine_columns, montant_minimum, duree_se
 
     return quantite_a_commander, ventes_N1, ventes_12_semaines_N1, ventes_12_dernieres_semaines, montant_total_initial
 
-def generer_rapport_excel(df, df_fournisseurs, montant_total):
-    """Génère un rapport Excel avec les quantités à commander et le minimum de commande."""
-    output = io.BytesIO()
-    with pd.ExcelWriter(output, engine="openpyxl") as writer:
-        # Écrire les quantités à commander
-        df_with_total = pd.concat([df, pd.DataFrame([["Total", "", "", "", "", "", "", montant_total]], columns=df.columns + ["Total"])], ignore_index=True)
-
-        # Ajouter une ligne pour le minimum de commande
-        min_commande_info = df_fournisseurs.iloc[0]  # Supposons que nous prenons le premier fournisseur pour l'exemple
-        min_commande_text = f"Minimum de commande : {min_commande_info['Montant minimum de commande']} €"
-        min_commande_row = pd.DataFrame([["", "", "", "", "", "", min_commande_text, ""]], columns=df.columns + ["Total"])
-
-        # Concaténer la ligne de minimum de commande avec les données
-        df_with_total = pd.concat([min_commande_row, df_with_total], ignore_index=True)
-
-        df_with_total.to_excel(writer, sheet_name="Quantités_à_commander", index=False)
-
-    output.seek(0)
-    return output
-
 st.set_page_config(page_title="Forecast App", layout="wide")
 st.title("📦 Application de Prévision des Commandes")
 
@@ -88,9 +68,6 @@ if uploaded_file:
         # Lire le fichier Excel en utilisant la ligne 8 comme en-tête
         df = pd.read_excel(uploaded_file, sheet_name="Tableau final", header=7)
         st.success("✅ Fichier principal chargé avec succès.")
-
-        # Lire l'onglet "Minimum de commande"
-        df_fournisseurs = pd.read_excel(uploaded_file, sheet_name="Minimum de commande")
 
         # Utiliser la colonne 13 comme point de départ
         start_index = 13  # Colonne "N"
@@ -134,13 +111,25 @@ if uploaded_file:
             # Organiser l'ordre des colonnes pour l'affichage
             display_columns = required_columns + ["Ventes N-1", "Ventes 12 semaines identiques N-1", "Ventes 12 dernières semaines", "Conditionnement", "Quantité à commander", "Stock à terme", "Tarif d'achat", "Total"]
 
+            # Afficher le montant total de la commande
+            st.metric(label="Montant total de la commande", value=f"{montant_total:.2f} €")
+
+            st.subheader("Quantités à commander pour les prochaines semaines")
+            st.dataframe(df[display_columns])
+
             # Filtrer les produits pour lesquels il y a des quantités à commander pour l'exportation
             df_filtered = df[df["Quantité à commander"] > 0].copy()
 
-            # Générer le rapport Excel
-            output = generer_rapport_excel(df_filtered[display_columns], df_fournisseurs, montant_total)
+            # Ajouter une ligne de total en bas du tableau filtré
+            total_row = pd.DataFrame(df_filtered[["Total"]].sum()).T
+            total_row.index = ["Total"]
+            df_with_total = pd.concat([df_filtered[display_columns], total_row], ignore_index=False)
 
             # Export des quantités à commander
+            output = io.BytesIO()
+            with pd.ExcelWriter(output, engine="openpyxl") as writer:
+                df_with_total.to_excel(writer, sheet_name="Quantités_à_commander", index=False)
+            output.seek(0)
             st.download_button("📥 Télécharger Quantités à commander", output, file_name="quantites_a_commander.xlsx")
 
     except Exception as e:
