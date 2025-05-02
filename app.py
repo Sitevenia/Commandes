@@ -220,7 +220,7 @@ if uploaded_file:
         logging.info("Processing 'Minimum de commande' sheet.")
         # **Important**: Adjust column names based on your actual Excel file
         supplier_col_min = "Fournisseur" # Column name for supplier in 'Minimum de commande' sheet
-        min_amount_col = "Minimum Commande €" # Column name for minimum amount
+        min_amount_col = "Minimum de Commande" # Column name for minimum amount
 
         required_min_cols = [supplier_col_min, min_amount_col]
         if all(col in df_min_commande.columns for col in required_min_cols):
