@@ -86,11 +86,14 @@ if uploaded_file:
         selected_fournisseurs = st.multiselect(
             "Sélectionnez les fournisseurs",
             options=fournisseurs,
-            default=fournisseurs  # Par défaut, tous les fournisseurs sont sélectionnés
+            default=[]  # Par défaut, aucun fournisseur n'est sélectionné
         )
 
         # Filtrer les données en fonction des fournisseurs sélectionnés
-        df_filtered = df[df["Fournisseur"].isin(selected_fournisseurs)]
+        if selected_fournisseurs:
+            df_filtered = df[df["Fournisseur"].isin(selected_fournisseurs)]
+        else:
+            df_filtered = pd.DataFrame(columns=df.columns)  # Créer un DataFrame vide si aucun fournisseur n'est sélectionné
 
         # Utiliser la colonne 13 comme point de départ
         start_index = 13  # Colonne "N"
@@ -111,49 +114,52 @@ if uploaded_file:
         # Interface pour saisir le montant minimum de commande
         montant_minimum = st.number_input("Montant minimum de commande (€)", value=0.0, step=100.0)
 
-        # Calculer la quantité à commander et les autres valeurs
-        df_filtered["Quantité à commander"], df_filtered["Ventes N-1"], df_filtered["Ventes 12 semaines identiques N-1"], df_filtered["Ventes 12 dernières semaines"], montant_total = \
-            calculer_quantite_a_commander(df_filtered, semaine_columns, montant_minimum, duree_semaines)
+        if not df_filtered.empty:
+            # Calculer la quantité à commander et les autres valeurs
+            df_filtered["Quantité à commander"], df_filtered["Ventes N-1"], df_filtered["Ventes 12 semaines identiques N-1"], df_filtered["Ventes 12 dernières semaines"], montant_total = \
+                calculer_quantite_a_commander(df_filtered, semaine_columns, montant_minimum, duree_semaines)
 
-        # Ajouter la colonne "Tarif d'achat"
-        df_filtered["Tarif d'achat"] = df_filtered["Tarif d'achat"]
+            # Ajouter la colonne "Tarif d'achat"
+            df_filtered["Tarif d'achat"] = df_filtered["Tarif d'achat"]
 
-        # Calculer la colonne "Total"
-        df_filtered["Total"] = df_filtered["Tarif d'achat"] * df_filtered["Quantité à commander"]
+            # Calculer la colonne "Total"
+            df_filtered["Total"] = df_filtered["Tarif d'achat"] * df_filtered["Quantité à commander"]
 
-        # Calculer la colonne "Stock à terme"
-        df_filtered["Stock à terme"] = df_filtered["Stock"] + df_filtered["Quantité à commander"]
+            # Calculer la colonne "Stock à terme"
+            df_filtered["Stock à terme"] = df_filtered["Stock"] + df_filtered["Quantité à commander"]
 
-        # Vérifier si les colonnes nécessaires existent
-        required_columns = ["AF_RefFourniss", "Référence Article", "Désignation Article", "Stock"]
-        missing_columns = [col for col in required_columns if col not in df_filtered.columns]
+            # Vérifier si les colonnes nécessaires existent
+            required_columns = ["AF_RefFourniss", "Référence Article", "Désignation Article", "Stock"]
+            missing_columns = [col for col in required_columns if col not in df_filtered.columns]
 
-        if missing_columns:
-            st.error(f"❌ Colonnes manquantes dans le fichier : {missing_columns}")
+            if missing_columns:
+                st.error(f"❌ Colonnes manquantes dans le fichier : {missing_columns}")
+            else:
+                # Organiser l'ordre des colonnes pour l'affichage
+                display_columns = required_columns + ["Ventes N-1", "Ventes 12 semaines identiques N-1", "Ventes 12 dernières semaines", "Conditionnement", "Quantité à commander", "Stock à terme", "Tarif d'achat", "Total"]
+
+                # Afficher le montant total de la commande
+                st.metric(label="Montant total de la commande", value=f"{montant_total:.2f} €")
+
+                st.subheader("Quantités à commander pour les prochaines semaines")
+                st.dataframe(df_filtered[display_columns])
+
+                # Filtrer les produits pour lesquels il y a des quantités à commander pour l'exportation
+                df_export = df_filtered[df_filtered["Quantité à commander"] > 0].copy()
+
+                # Ajouter une ligne de total en bas du tableau filtré
+                total_row = pd.DataFrame(df_export[["Total"]].sum()).T
+                total_row.index = ["Total"]
+                df_with_total = pd.concat([df_export[display_columns], total_row], ignore_index=False)
+
+                # Export des quantités à commander
+                output = io.BytesIO()
+                with pd.ExcelWriter(output, engine="openpyxl") as writer:
+                    df_with_total.to_excel(writer, sheet_name="Quantités_à_commander", index=False)
+                output.seek(0)
+                st.download_button("📥 Télécharger Quantités à commander", output, file_name="quantites_a_commander.xlsx")
         else:
-            # Organiser l'ordre des colonnes pour l'affichage
-            display_columns = required_columns + ["Ventes N-1", "Ventes 12 semaines identiques N-1", "Ventes 12 dernières semaines", "Conditionnement", "Quantité à commander", "Stock à terme", "Tarif d'achat", "Total"]
-
-            # Afficher le montant total de la commande
-            st.metric(label="Montant total de la commande", value=f"{montant_total:.2f} €")
-
-            st.subheader("Quantités à commander pour les prochaines semaines")
-            st.dataframe(df_filtered[display_columns])
-
-            # Filtrer les produits pour lesquels il y a des quantités à commander pour l'exportation
-            df_export = df_filtered[df_filtered["Quantité à commander"] > 0].copy()
-
-            # Ajouter une ligne de total en bas du tableau filtré
-            total_row = pd.DataFrame(df_export[["Total"]].sum()).T
-            total_row.index = ["Total"]
-            df_with_total = pd.concat([df_export[display_columns], total_row], ignore_index=False)
-
-            # Export des quantités à commander
-            output = io.BytesIO()
-            with pd.ExcelWriter(output, engine="openpyxl") as writer:
-                df_with_total.to_excel(writer, sheet_name="Quantités_à_commander", index=False)
-            output.seek(0)
-            st.download_button("📥 Télécharger Quantités à commander", output, file_name="quantites_a_commander.xlsx")
+            st.warning("Veuillez sélectionner au moins un fournisseur pour effectuer les calculs.")
 
     except Exception as e:
         st.error(f"❌ Erreur : {e}")
