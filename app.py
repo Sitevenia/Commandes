@@ -82,10 +82,6 @@ if uploaded_file:
         # Lire l'onglet "Minimum de commande"
         df_fournisseurs = pd.read_excel(uploaded_file, sheet_name="Minimum de commande")
 
-        # Vérifier les colonnes disponibles
-        st.write("Colonnes disponibles dans 'Tableau final':", df.columns)
-        st.write("Colonnes disponibles dans 'Minimum de commande':", df_fournisseurs.columns)
-
         # Utiliser la colonne 13 comme point de départ
         start_index = 13  # Colonne "N"
 
@@ -128,19 +124,21 @@ if uploaded_file:
             # Organiser l'ordre des colonnes pour l'affichage
             display_columns = required_columns + ["Ventes N-1", "Ventes 12 semaines identiques N-1", "Ventes 12 dernières semaines", "Conditionnement", "Quantité à commander", "Stock à terme", "Tarif d'achat", "Total"]
 
+            # Calculer le montant total de la commande par fournisseur
+            montant_total_par_fournisseur = df.groupby("AF_RefFourniss")["Total"].sum()
+
             # Afficher le montant total de la commande
             st.metric(label="Montant total de la commande", value=f"{montant_total:.2f} €")
 
             # Afficher les alertes pour les minimums de commande
             alertes = []
             for index, row in df_fournisseurs.iterrows():
-                montant_commande = df[df["AF_RefFourniss"] == row["AF_RefFourniss"]]["Total"].sum()
-                if montant_commande < row["Montant minimum de commande"]:
+                if montant_total_par_fournisseur.get(row["AF_RefFourniss"], 0) < row["Montant minimum de commande"]:
                     alertes.append({
                         "Fournisseur": row["Fournisseur"],
                         "Montant minimum": row["Montant minimum de commande"],
-                        "Montant commandé": montant_commande,
-                        "Montant manquant": row["Montant minimum de commande"] - montant_commande
+                        "Montant commandé": montant_total_par_fournisseur.get(row["AF_RefFourniss"], 0),
+                        "Montant manquant": row["Montant minimum de commande"] - montant_total_par_fournisseur.get(row["AF_RefFourniss"], 0)
                     })
 
             if alertes:
