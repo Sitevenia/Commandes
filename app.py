@@ -70,8 +70,8 @@ if uploaded_file:
         df = pd.read_excel(uploaded_file, sheet_name="Tableau final", header=7)
         st.success("✅ Fichier principal chargé avec succès.")
 
-        # Filtrer les lignes où le fournisseur n'est pas #FILTER
-        df = df[df["Fournisseur"] != "#FILTER"]
+        # Filtrer les lignes où le fournisseur n'est pas #FILTER ou vide
+        df = df[(df["Fournisseur"] != "#FILTER") & (df["Fournisseur"].notna()) & (df["Fournisseur"] != "")]
 
         # Extraire la liste des fournisseurs à partir de la colonne "Fournisseur" (colonne B)
         fournisseurs = df["Fournisseur"].unique().tolist()
