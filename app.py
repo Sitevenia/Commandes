@@ -57,16 +57,6 @@ def calculer_quantite_a_commander(df, semaine_columns, montant_minimum, duree_se
 
     return quantite_a_commander, ventes_N1, ventes_12_semaines_N1, ventes_12_dernieres_semaines, montant_total_initial
 
-def generer_rapport_excel(df, montant_total):
-    """Génère un rapport Excel avec les quantités à commander."""
-    output = io.BytesIO()
-    with pd.ExcelWriter(output, engine="openpyxl") as writer:
-        # Écrire les quantités à commander
-        df_with_total = pd.concat([df, pd.DataFrame([["Total", "", "", "", "", "", "", montant_total]], columns=df.columns + ["Total"])], ignore_index=True)
-        df_with_total.to_excel(writer, sheet_name="Quantités_à_commander", index=False)
-    output.seek(0)
-    return output
-
 st.set_page_config(page_title="Forecast App", layout="wide")
 st.title("📦 Application de Prévision des Commandes")
 
@@ -127,10 +117,19 @@ if uploaded_file:
             st.subheader("Quantités à commander pour les prochaines semaines")
             st.dataframe(df[display_columns])
 
-            # Générer le rapport Excel
-            output = generer_rapport_excel(df[display_columns], montant_total)
+            # Filtrer les produits pour lesquels il y a des quantités à commander pour l'exportation
+            df_filtered = df[df["Quantité à commander"] > 0].copy()
+
+            # Ajouter une ligne de total en bas du tableau filtré
+            total_row = pd.DataFrame(df_filtered[["Total"]].sum()).T
+            total_row.index = ["Total"]
+            df_with_total = pd.concat([df_filtered[display_columns], total_row], ignore_index=False)
 
             # Export des quantités à commander
+            output = io.BytesIO()
+            with pd.ExcelWriter(output, engine="openpyxl") as writer:
+                df_with_total.to_excel(writer, sheet_name="Quantités_à_commander", index=False)
+            output.seek(0)
             st.download_button("📥 Télécharger Quantités à commander", output, file_name="quantites_a_commander.xlsx")
 
     except Exception as e:
