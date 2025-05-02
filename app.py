@@ -82,6 +82,10 @@ if uploaded_file:
         # Lire l'onglet "Minimum de commande"
         df_fournisseurs = pd.read_excel(uploaded_file, sheet_name="Minimum de commande")
 
+        # Vérifier les colonnes disponibles
+        st.write("Colonnes disponibles dans 'Tableau final':", df.columns)
+        st.write("Colonnes disponibles dans 'Minimum de commande':", df_fournisseurs.columns)
+
         # Utiliser la colonne 13 comme point de départ
         start_index = 13  # Colonne "N"
 
