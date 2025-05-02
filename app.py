@@ -62,7 +62,7 @@ def generer_rapport_excel(df, df_fournisseurs, montant_total):
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
         # Écrire les quantités à commander
-        df_with_total = pd.concat([df, pd.DataFrame([["Total", "", "", "", "", "", "", "", montant_total]], columns=df.columns + ["Total"])], ignore_index=True)
+        df_with_total = pd.concat([df, pd.DataFrame([["Total", "", "", "", "", "", "", montant_total]], columns=df.columns + ["Total"])], ignore_index=True)
         df_with_total.to_excel(writer, sheet_name="Quantités_à_commander", index=False)
 
         # Écrire les informations des fournisseurs
