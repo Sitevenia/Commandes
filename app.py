@@ -134,12 +134,6 @@ if uploaded_file:
             # Organiser l'ordre des colonnes pour l'affichage
             display_columns = required_columns + ["Ventes N-1", "Ventes 12 semaines identiques N-1", "Ventes 12 dernières semaines", "Conditionnement", "Quantité à commander", "Stock à terme", "Tarif d'achat", "Total"]
 
-            # Afficher le montant total de la commande
-            st.metric(label="Montant total de la commande", value=f"{montant_total:.2f} €")
-
-            st.subheader("Quantités à commander pour les prochaines semaines")
-            st.dataframe(df[display_columns])
-
             # Filtrer les produits pour lesquels il y a des quantités à commander pour l'exportation
             df_filtered = df[df["Quantité à commander"] > 0].copy()
 
