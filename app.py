@@ -57,33 +57,13 @@ def calculer_quantite_a_commander(df, semaine_columns, montant_minimum, duree_se
 
     return quantite_a_commander, ventes_N1, ventes_12_semaines_N1, ventes_12_dernieres_semaines, montant_total_initial
 
-def generer_rapport_excel(df, df_fournisseurs, montant_total):
-    """Génère un rapport Excel avec les quantités à commander et les alertes pour les minimums de commande."""
+def generer_rapport_excel(df, montant_total):
+    """Génère un rapport Excel avec les quantités à commander."""
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
         # Écrire les quantités à commander
-        df_with_total = pd.concat([df, pd.DataFrame([["Total", "", "", "", "", "", "", "", montant_total]], columns=df.columns + ["Total"])], ignore_index=True)
+        df_with_total = pd.concat([df, pd.DataFrame([["Total", "", "", "", "", "", "", montant_total]], columns=df.columns + ["Total"])], ignore_index=True)
         df_with_total.to_excel(writer, sheet_name="Quantités_à_commander", index=False)
-
-        # Écrire les informations des fournisseurs
-        df_fournisseurs.to_excel(writer, sheet_name="Minimum de commande", index=False)
-
-        # Ajouter une feuille pour les alertes
-        alertes = []
-        for index, row in df_fournisseurs.iterrows():
-            montant_commande = df[df["AF_RefFourniss"] == row["AF_RefFourniss"]]["Total"].sum()
-            if montant_commande < row["Montant minimum de commande"]:
-                alertes.append({
-                    "Fournisseur": row["Fournisseur"],
-                    "Montant minimum": row["Montant minimum de commande"],
-                    "Montant commandé": montant_commande,
-                    "Montant manquant": row["Montant minimum de commande"] - montant_commande
-                })
-
-        if alertes:
-            df_alertes = pd.DataFrame(alertes)
-            df_alertes.to_excel(writer, sheet_name="Alertes", index=False)
-
     output.seek(0)
     return output
 
@@ -147,11 +127,32 @@ if uploaded_file:
             # Afficher le montant total de la commande
             st.metric(label="Montant total de la commande", value=f"{montant_total:.2f} €")
 
+            # Afficher les alertes pour les minimums de commande
+            alertes = []
+            for index, row in df_fournisseurs.iterrows():
+                montant_commande = df[df["AF_RefFourniss"] == row["AF_RefFourniss"]]["Total"].sum()
+                if montant_commande < row["Montant minimum de commande"]:
+                    alertes.append({
+                        "Fournisseur": row["Fournisseur"],
+                        "Montant minimum": row["Montant minimum de commande"],
+                        "Montant commandé": montant_commande,
+                        "Montant manquant": row["Montant minimum de commande"] - montant_commande
+                    })
+
+            if alertes:
+                st.error("🚨 Alertes de minimum de commande :")
+                for alerte in alertes:
+                    st.write(f"**Fournisseur :** {alerte['Fournisseur']}")
+                    st.write(f"**Montant minimum de commande :** {alerte['Montant minimum']} €")
+                    st.write(f"**Montant commandé :** {alerte['Montant commandé']} €")
+                    st.write(f"**Montant manquant :** {alerte['Montant manquant']} €")
+                    st.write("---")
+
             st.subheader("Quantités à commander pour les prochaines semaines")
             st.dataframe(df[display_columns])
 
             # Générer le rapport Excel
-            output = generer_rapport_excel(df[display_columns], df_fournisseurs, montant_total)
+            output = generer_rapport_excel(df[display_columns], montant_total)
 
             # Export des quantités à commander
             st.download_button("📥 Télécharger Quantités à commander", output, file_name="quantites_a_commander.xlsx")
