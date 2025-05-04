@@ -360,9 +360,16 @@ if 'df_initial_filtered' in st.session_state and st.session_state.df_initial_fil
             col1_cmd, col2_cmd = st.columns(2)
             with col1_cmd:
                 duree_semaines_cmd = st.number_input("⏳ Durée couverture (semaines)", value=4, min_value=1, step=1, key="duree_cmd")
-            with col2_cmd:
-                montant_minimum_input_cmd = st.number_input("💶 Montant minimum global (€)", value=0.0, min_value=0.0, step=50.0, format="%.2f", key="montant_min_cmd")
-
+                    with col2_cmd: # In Tab 1
+            montant_minimum_input_cmd = st.number_input(
+                "💶 Montant minimum global (€)",
+                value=0.0,
+                min_value=0.0,
+                # max_value IS NOT SET HERE!
+                step=50.0,
+                format="%.2f",
+                key="montant_min_cmd" # Key used in Tab 1
+            )
             if st.button("🚀 Calculer les Quantités", key="calculate_button_cmd"):
                 with st.spinner("Calcul en cours..."):
                      result_cmd = calculer_quantite_a_commande(
