@@ -96,6 +96,8 @@ def calculer_quantite_a_commander(df, semaine_columns, montant_minimum_input, du
             if iters >= max_iter and mt_actuel < montant_minimum_input: st.error("Ajustement montant min échoué (max iter).")
         # Montant Final
         mt_final = sum(q * p for q, p in zip(qcomm, tarif))
+        # Rename calculated columns for clarity in results df
+        # Return tuple: quantities, N1_total, N1_sim_12, N_last_12, total_amount
         return (qcomm, ventes_N1, v12N1, v12last, mt_final)
     except Exception as e: st.error(f"Erreur calcul qté: {e}"); logging.exception("Calc Error:"); return None
 
@@ -252,7 +254,7 @@ if uploaded_file and st.session_state.df_full is None:
         df_min_commande_temp = safe_read_excel(file_buffer, sheet_name="Minimum de commande"); min_order_dict_temp = {}
         if df_min_commande_temp is not None:
             st.success("✅ Onglet 'Minimum de commande' lu.")
-            supplier_col_min = "Fournisseur"; min_amount_col = "Minimum de Commande"; required_min_cols = [supplier_col_min, min_amount_col]
+            supplier_col_min = "Fournisseur"; min_amount_col = "Minimum de Commande; required_min_cols = [supplier_col_min, min_amount_col]
             if all(col in df_min_commande_temp.columns for col in required_min_cols):
                 try:
                     df_min_commande_temp[supplier_col_min] = df_min_commande_temp[supplier_col_min].astype(str).str.strip(); df_min_commande_temp[min_amount_col] = pd.to_numeric(df_min_commande_temp[min_amount_col], errors='coerce')
@@ -307,12 +309,11 @@ if 'df_initial_filtered' in st.session_state and st.session_state.df_initial_fil
     # ========================= TAB 1: Prévision Commande =========================
     with tab1:
         st.header("Prévision Quantités à Commander"); st.caption("Utilise fournisseurs sélectionnés.")
-        # CORRECTED Condition block
+        # CORRECTED Condition block structure
         if df_display_filtered.empty:
              if selected_fournisseurs:
                  st.warning("Aucun article trouvé pour le(s) fournisseur(s) sélectionné(s).")
              else:
-                 # Show this message if df_base_filtered itself was empty OR no suppliers selected
                  if not fournisseurs_list:
                       st.info("Aucun fournisseur valide trouvé dans le fichier après filtrage initial.")
                  else:
@@ -327,7 +328,6 @@ if 'df_initial_filtered' in st.session_state and st.session_state.df_initial_fil
                 with st.spinner("Calcul..."): result_cmd = calculer_quantite_a_commander(df_display_filtered, semaine_columns, montant_minimum_input_cmd, duree_semaines_cmd)
                 if result_cmd:
                     st.success("✅ Calcul OK."); (q_calc, vN1, v12N1, v12l, mt_calc) = result_cmd; df_res_cmd = df_display_filtered.copy()
-                    # Use simplified column names for results assignment for clarity
                     df_res_cmd["Qte Cmdée"] = q_calc; df_res_cmd["Vts N-1 Total"] = vN1; df_res_cmd["Vts 12 N-1 Sim"] = v12N1; df_res_cmd["Vts 12 Dern."] = v12l
                     df_res_cmd["Tarif Ach."] = pd.to_numeric(df_res_cmd["Tarif d'achat"], errors='coerce').fillna(0); df_res_cmd["Total Cmd"] = df_res_cmd["Tarif Ach."] * df_res_cmd["Qte Cmdée"]; df_res_cmd["Stock Terme"] = df_res_cmd["Stock"] + df_res_cmd["Qte Cmdée"]
                     st.session_state.calc_res_df = df_res_cmd; st.session_state.mt_calc = mt_calc; st.session_state.sel_fourn_calc_cmd = selected_fournisseurs; st.rerun()
@@ -346,13 +346,11 @@ if 'df_initial_filtered' in st.session_state and st.session_state.df_initial_fil
                                 if req_min > 0 and act_tot < req_min:
                                     diff = req_min - act_tot; st.warning(f"⚠️ **Min Non Atteint ({sup_cmd})**\nMontant: **{act_tot:,.2f}€** | Requis: **{req_min:,.2f}€** (Manque: {diff:,.2f}€)")
                             else: logging.warning("Col 'Total Cmd' absente.")
-
-                    # Display Table using simplified result column names
+                    # Display Table
                     cols_req = ["Fournisseur", "AF_RefFourniss", "Référence Article", "Désignation Article", "Stock"]; cols_base = cols_req + ["Vts N-1 Total", "Vts 12 N-1 Sim", "Vts 12 Dern.", "Conditionnement", "Qte Cmdée", "Stock Terme", "Tarif Ach.", "Total Cmd"]
                     cols_disp = [c for c in cols_base if c in df_cmd_disp.columns];
                     if any(c not in df_cmd_disp.columns for c in cols_req): st.error("❌ Cols manquantes affichage.")
                     else: st.dataframe(df_cmd_disp[cols_disp].style.format({"Tarif Ach.": "{:,.2f}€", "Total Cmd": "{:,.2f}€", "Vts N-1 Total": "{:,.0f}", "Vts 12 N-1 Sim": "{:,.0f}", "Vts 12 Dern.": "{:,.0f}", "Stock": "{:,.0f}", "Conditionnement": "{:,.0f}", "Qte Cmdée": "{:,.0f}", "Stock Terme": "{:,.0f}"}, na_rep="-", thousands=","))
-
                     st.markdown("#### Export Commande"); df_exp_cmd = df_cmd_disp[df_cmd_disp["Qte Cmdée"] > 0].copy()
                     if not df_exp_cmd.empty:
                          out_cmd = io.BytesIO(); sheets_cr_cmd = 0
@@ -371,9 +369,9 @@ if 'df_initial_filtered' in st.session_state and st.session_state.df_initial_fil
                                              df_sh = pd.concat([df_sh_data, pd.DataFrame([tot_r]), pd.DataFrame([min_r])], ignore_index=True); s_name = sanitize_sheet_name(sup_exp)
                                              try: # Write sheet and formulas
                                                  df_sh.to_excel(writer_cmd, sheet_name=s_name, index=False); ws = writer_cmd.sheets[s_name];
-                                                 # Apply formulas (Corrected Indentation)
+                                                 # Formulas for data rows
                                                  for r in range(2, n_rows + 2): form = f"={qty_l}{r}*{price_l}{r}"; cell = ws[f"{tot_l}{r}"]; cell.value = form; cell.number_format = '#,##0.00€'
-                                                 # Apply SUM formula (Corrected Indentation)
+                                                 # SUM formula (Corrected Indentation)
                                                  total_formula_row_cmd = n_rows + 2
                                                  if n_rows > 0: sum_form = f"=SUM({tot_l}2:{tot_l}{n_rows + 1})"; s_cell = ws[f"{tot_l}{total_formula_row_cmd}"]; s_cell.value = sum_form; s_cell.number_format = '#,##0.00€'
                                                  # Increment count (Corrected Indentation)
@@ -409,9 +407,21 @@ if 'df_initial_filtered' in st.session_state and st.session_state.df_initial_fil
                     m_sales_col = "Ventes Moy Mensuel (Période)"; can_filt = False; df_rot_disp = pd.DataFrame()
                     if m_sales_col in df_rot_orig.columns: m_sales_ser = pd.to_numeric(df_rot_orig[m_sales_col], errors='coerce').fillna(0); can_filt = True
                     else: st.warning(f"Col '{m_sales_col}' non trouvée.")
-                    if show_all_f: df_rot_disp = df_rot_orig.copy(); st.caption(f"Affichage {len(df_rot_disp)} articles.")
-                    elif can_filt: try: df_rot_disp = df_rot_orig[m_sales_ser < thr_disp].copy(); st.caption(f"Filtre: Ventes < {thr_disp:.1f}/mois. {len(df_rot_disp)} / {len(df_rot_orig)} articles.") except Exception as ef: st.error(f"Err filtre: {ef}"); df_rot_disp = df_rot_orig.copy()
-                    else: df_rot_disp = df_rot_orig.copy()
+                    # CORRECTED Filter block structure
+                    if show_all_f:
+                        df_rot_disp = df_rot_orig.copy(); st.caption(f"Affichage {len(df_rot_disp)} articles.")
+                    elif can_filt:
+                        try:
+                            df_rot_disp = df_rot_orig[m_sales_ser < thr_disp].copy()
+                            st.caption(f"Filtre: Ventes < {thr_disp:.1f}/mois. {len(df_rot_disp)} / {len(df_rot_orig)} articles.")
+                        except Exception as ef:
+                             st.error(f"Err filtre: {ef}")
+                             df_rot_disp = df_rot_orig.copy() # Fallback on error
+                    else: # Cannot filter
+                        df_rot_disp = df_rot_orig.copy()
+                        if not show_all_f: # Only warn if filtering was intended
+                            st.info("Affichage tous résultats car filtrage impossible.")
+
                     cols_rot = ["AF_RefFourniss", "Référence Article", "Désignation Article", "Tarif d'achat", "Stock", "Unités Vendues (Période)", "Ventes Moy Hebdo (Période)", "Ventes Moy Mensuel (Période)", "Semaines Stock (WoS)", "Rotation Unités (Proxy)", "Valeur Stock Actuel (€)", "COGS (Période)", "Rotation Valeur (Proxy)"]
                     cols_rot_fin = [c for c in cols_rot if c in df_rot_disp.columns]
                     if df_rot_disp.empty:
@@ -488,7 +498,7 @@ if 'df_initial_filtered' in st.session_state and st.session_state.df_initial_fil
                     else: st.error("❌ Simulation échouée.");
             if 'forecast_result_df' in st.session_state and st.session_state.forecast_result_df is not None:
                  current_params_disp = {'suppliers': selected_fournisseurs, 'months': sel_months_fcst, 'type': sim_t, 'prog': st.session_state.get('forecast_prog_pct', 5.0) if sim_t=='Simple Progression' else 0, 'obj': st.session_state.get('forecast_target_amount', 10000.0) if sim_t=='Objectif Montant' else 0}
-                 if st.session_state.get('forecast_params') == curr_params_disp:
+                 if st.session_state.get('forecast_params') == current_params_disp:
                     st.markdown("---"); st.markdown("#### Résultats Simulation")
                     df_fcst_disp = st.session_state.forecast_result_df;
                     mq_cols = [f"Qté Prév. {m}" for m in sel_months_fcst if f"Qté Prév. {m}" in df_fcst_disp.columns]; ma_cols = [f"Montant Prév. {m} (€)" for m in sel_months_fcst if f"Montant Prév. {m} (€)" in df_fcst_disp.columns]; n1m_cols = [f"Ventes N-1 {m}" for m in sel_months_fcst if f"Ventes N-1 {m}" in df_fcst_disp.columns]
