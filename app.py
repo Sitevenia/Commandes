@@ -119,7 +119,6 @@ def calculer_rotation_stock(df, semaine_columns, periode_semaines):
         df_rotation["Tarif d'achat"] = pd.to_numeric(df_rotation["Tarif d'achat"], errors='coerce').fillna(0)
         # Calculate WoS safely
         denom_wos = df_rotation["Ventes Moy Hebdo (Période)"]
-        # Use np.divide for safe division, setting invalid results to np.inf or 0
         df_rotation["Semaines Stock (WoS)"] = np.divide(
             df_rotation["Stock"], denom_wos,
             out=np.full_like(df_rotation["Stock"], np.inf, dtype=np.float64), # Output array initialized with inf
@@ -134,9 +133,7 @@ def calculer_rotation_stock(df, semaine_columns, periode_semaines):
             out=np.full_like(denom_rot_unit, np.inf, dtype=np.float64),
             where=denom_rot_unit!=0
             )
-        # Handle potential 0/0 -> NaN (although np.divide might handle this better)
-        df_rotation["Rotation Unités (Proxy)"].fillna(0, inplace=True)
-        # If sales=0 and stock=0, turnover should be 0, not inf
+        df_rotation["Rotation Unités (Proxy)"].fillna(0, inplace=True) # Handle potential 0/0 -> NaN
         df_rotation.loc[(df_rotation["Unités Vendues (Période)"] <= 0) & (denom_rot_unit <= 0), "Rotation Unités (Proxy)"] = 0.0
 
         # Calculate Value Turnover safely
@@ -148,9 +145,7 @@ def calculer_rotation_stock(df, semaine_columns, periode_semaines):
             out=np.full_like(denom_rot_val, np.inf, dtype=np.float64),
             where=denom_rot_val!=0
             )
-        # Handle potential 0/0 -> NaN
-        df_rotation["Rotation Valeur (Proxy)"].fillna(0, inplace=True)
-        # If COGS=0 and Value=0, turnover should be 0
+        df_rotation["Rotation Valeur (Proxy)"].fillna(0, inplace=True) # Handle potential 0/0 -> NaN
         df_rotation.loc[(df_rotation["COGS (Période)"] <= 0) & (denom_rot_val <= 0), "Rotation Valeur (Proxy)"] = 0.0
 
         return df_rotation
@@ -396,39 +391,96 @@ if 'df_initial_filtered' in st.session_state and st.session_state.df_initial_fil
                 st.markdown("---"); st.markdown(f"#### Résultats de l'Analyse de Rotation ({st.session_state.get('rotation_period_label', '')})")
                 df_results_rot_orig = st.session_state.rotation_result_df # Get original results
 
-                rotation_display_cols = ["AF_RefFourniss", "Référence Article", "Désignation Article", "Stock", "Unités Vendues (Période)", "Ventes Moy Hebdo (Période)", "Semaines Stock (WoS)", "Rotation Unités (Proxy)", "Valeur Stock Actuel (€)", "COGS (Période)", "Rotation Valeur (Proxy)"]
+                # Define columns to display for rotation - ADD Tarif d'achat
+                rotation_display_cols = [
+                    "AF_RefFourniss", "Référence Article", "Désignation Article",
+                    "Tarif d'achat", # <-- ADDED Tarif d'achat here
+                    "Stock",
+                    "Unités Vendues (Période)", "Ventes Moy Hebdo (Période)",
+                    "Semaines Stock (WoS)", "Rotation Unités (Proxy)",
+                    "Valeur Stock Actuel (€)", "COGS (Période)", "Rotation Valeur (Proxy)"
+                 ]
+                # Filter to only columns that actually exist in the results df
                 rotation_display_cols_final = [col for col in rotation_display_cols if col in df_results_rot_orig.columns]
 
                 if df_results_rot_orig.empty: st.info("Aucune donnée à afficher pour la rotation.")
                 elif not rotation_display_cols_final: st.error("Aucune colonne de résultat de rotation trouvée pour l'affichage.")
                 else:
-                    # --- Correction Here: Replace inf before styling ---
+                    # --- Prepare for Display: Round, Replace inf, and Format ---
                     df_rot_display_copy = df_results_rot_orig[rotation_display_cols_final].copy()
-                    # Replace inf with a display string in the copy
+
+                    # Define columns that might contain infinity AFTER calculation
+                    # inf_possible_cols = ["Semaines Stock (WoS)", "Rotation Unités (Proxy)", "Rotation Valeur (Proxy)"] # Not strictly needed anymore
+
+                    # Apply rounding BEFORE replacing inf, to numeric columns only
+                    numeric_cols_to_round = {
+                        "Tarif d'achat": 2,
+                        "Ventes Moy Hebdo (Période)": 2,
+                        "Semaines Stock (WoS)": 1, # Round before potential inf replacement
+                        "Rotation Unités (Proxy)": 2, # Round before potential inf replacement
+                        "Valeur Stock Actuel (€)": 2,
+                        "COGS (Période)": 2,
+                        "Rotation Valeur (Proxy)": 2 # Round before potential inf replacement
+                    }
+
+                    for col, decimals in numeric_cols_to_round.items():
+                        if col in df_rot_display_copy.columns:
+                            # Ensure column is numeric before rounding, handle non-numeric gracefully
+                             df_rot_display_copy[col] = pd.to_numeric(df_rot_display_copy[col], errors='coerce')
+                             # Only round if it's actually numeric after coercion
+                             if pd.api.types.is_numeric_dtype(df_rot_display_copy[col]):
+                                 df_rot_display_copy[col] = df_rot_display_copy[col].round(decimals)
+
+
+                    # Now replace infinity values with 'Inf' string AFTER rounding attempt
                     df_rot_display_copy.replace([np.inf, -np.inf], 'Inf', inplace=True)
 
-                    st.dataframe(df_rot_display_copy.style.format({
+                    # Define format dictionary for styling
+                    formatters = {
+                        "Tarif d'achat": "{:,.2f}€",
                         "Stock": "{:,.0f}",
                         "Unités Vendues (Période)": "{:,.0f}",
                         "Ventes Moy Hebdo (Période)": "{:,.2f}",
-                        "Semaines Stock (WoS)": "{}", # Format as string (can be 'Inf')
-                        "Rotation Unités (Proxy)": "{}", # Format as string (can be 'Inf')
+                        "Semaines Stock (WoS)": "{}", # Display as is (rounded number or 'Inf')
+                        "Rotation Unités (Proxy)": "{}", # Display as is (rounded number or 'Inf')
                         "Valeur Stock Actuel (€)": "{:,.2f}€",
                         "COGS (Période)": "{:,.2f}€",
-                        "Rotation Valeur (Proxy)": "{}", # Format as string (can be 'Inf')
-                        }, na_rep="-", thousands=",") # Apply formatting
+                        "Rotation Valeur (Proxy)": "{}", # Display as is (rounded number or 'Inf')
+                    }
+
+                    # Apply formatting using the defined formatters
+                    st.dataframe(df_rot_display_copy.style.format(
+                        formatters, na_rep="-", thousands=","
+                        )
                     )
 
                 # Export Rotation Data
                 st.markdown("#### Exportation de l'Analyse")
                 if not df_results_rot_orig.empty:
                      output_rot = io.BytesIO()
-                     export_rot_cols = ["Fournisseur"] + rotation_display_cols_final if "Fournisseur" in df_results_rot_orig.columns else rotation_display_cols_final
-                     # Use original df for export, replace inf there just before write
-                     df_export_rot = df_results_rot_orig[export_rot_cols].copy()
-                     df_export_rot.replace([np.inf, -np.inf], 'Infini', inplace=True) # Replace inf before export
-                     with pd.ExcelWriter(output_rot, engine="openpyxl") as writer_rot: df_export_rot.to_excel(writer_rot, sheet_name="Analyse_Rotation", index=False)
+                     # ADD Tarif d'achat to export columns list if it's not already implicitly included
+                     export_rot_cols_base = ["AF_RefFourniss", "Référence Article", "Désignation Article", "Tarif d'achat", "Stock", "Unités Vendues (Période)", "Ventes Moy Hebdo (Période)", "Semaines Stock (WoS)", "Rotation Unités (Proxy)", "Valeur Stock Actuel (€)", "COGS (Période)", "Rotation Valeur (Proxy)"]
+                     export_rot_cols_with_fourn = ["Fournisseur"] + export_rot_cols_base if "Fournisseur" in df_results_rot_orig.columns else export_rot_cols_base
+                     # Ensure only existing columns are selected
+                     export_rot_cols_final = [col for col in export_rot_cols_with_fourn if col in df_results_rot_orig.columns]
+
+                     # Use original df for export, round relevant columns, replace inf
+                     df_export_rot = df_results_rot_orig[export_rot_cols_final].copy()
+
+                     # Round numeric columns for export
+                     for col, decimals in numeric_cols_to_round.items():
+                          if col in df_export_rot.columns:
+                              df_export_rot[col] = pd.to_numeric(df_export_rot[col], errors='coerce')
+                              if pd.api.types.is_numeric_dtype(df_export_rot[col]):
+                                 df_export_rot[col] = df_export_rot[col].round(decimals)
+
+                     # Replace inf AFTER rounding for export
+                     df_export_rot.replace([np.inf, -np.inf], 'Infini', inplace=True) # Use 'Infini' string for export
+
+                     with pd.ExcelWriter(output_rot, engine="openpyxl") as writer_rot:
+                         df_export_rot.to_excel(writer_rot, sheet_name="Analyse_Rotation", index=False)
                      output_rot.seek(0)
+
                      suppliers_export_rot = st.session_state.get('selected_fournisseurs_session', [])
                      fname_rot = f"analyse_rotation_{'multiples' if len(suppliers_export_rot)>1 else sanitize_sheet_name(suppliers_export_rot[0] if suppliers_export_rot else 'NA')}_{pd.Timestamp.now().strftime('%Y%m%d_%H%M')}.xlsx"
                      st.download_button(label="📥 Télécharger Analyse Rotation", data=output_rot, file_name=fname_rot, mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key="download_rot_btn")
