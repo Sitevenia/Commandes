@@ -109,43 +109,37 @@ def calculer_rotation_stock(df, semaine_columns, periode_semaines):
         elif periode_semaines and periode_semaines > 0: semaines_analyse = semaine_columns; nb_semaines_analyse = len(semaine_columns); st.caption(f"Analyse sur {nb_semaines_analyse} sem. disponibles.")
         else: semaines_analyse = semaine_columns; nb_semaines_analyse = len(semaine_columns)
         if not semaines_analyse: st.warning("Aucune colonne vente pour analyse rotation."); return df_rotation # Return df with potentially no new cols
+
         # Calculs
-        # Ensure semaine columns are numeric before summing
         for col in semaines_analyse: df_rotation[col] = pd.to_numeric(df_rotation[col], errors='coerce').fillna(0)
         df_rotation["Unités Vendues (Période)"] = df_rotation[semaines_analyse].sum(axis=1)
         df_rotation["Ventes Moy Hebdo (Période)"] = df_rotation["Unités Vendues (Période)"] / nb_semaines_analyse if nb_semaines_analyse > 0 else 0.0
-        # Ensure Stock is numeric before division
+
+        # --- Calculate Average Monthly Sales ---
+        avg_weeks_per_month = 52 / 12
+        df_rotation["Ventes Moy Mensuel (Période)"] = df_rotation["Ventes Moy Hebdo (Période)"] * avg_weeks_per_month
+
+        # Ensure Stock & Tariff are numeric
         df_rotation["Stock"] = pd.to_numeric(df_rotation["Stock"], errors='coerce').fillna(0)
         df_rotation["Tarif d'achat"] = pd.to_numeric(df_rotation["Tarif d'achat"], errors='coerce').fillna(0)
+
         # Calculate WoS safely
         denom_wos = df_rotation["Ventes Moy Hebdo (Période)"]
-        df_rotation["Semaines Stock (WoS)"] = np.divide(
-            df_rotation["Stock"], denom_wos,
-            out=np.full_like(df_rotation["Stock"], np.inf, dtype=np.float64), # Output array initialized with inf
-            where=denom_wos!=0 # Condition for division
-            )
-        df_rotation.loc[df_rotation["Stock"] <= 0, "Semaines Stock (WoS)"] = 0.0 # Set WoS to 0 if stock is 0 or less
+        df_rotation["Semaines Stock (WoS)"] = np.divide(df_rotation["Stock"], denom_wos, out=np.full_like(df_rotation["Stock"], np.inf, dtype=np.float64), where=denom_wos!=0)
+        df_rotation.loc[df_rotation["Stock"] <= 0, "Semaines Stock (WoS)"] = 0.0
 
         # Calculate Unit Turnover safely
         denom_rot_unit = df_rotation["Stock"]
-        df_rotation["Rotation Unités (Proxy)"] = np.divide(
-            df_rotation["Unités Vendues (Période)"], denom_rot_unit,
-            out=np.full_like(denom_rot_unit, np.inf, dtype=np.float64),
-            where=denom_rot_unit!=0
-            )
-        df_rotation["Rotation Unités (Proxy)"].fillna(0, inplace=True) # Handle potential 0/0 -> NaN
+        df_rotation["Rotation Unités (Proxy)"] = np.divide(df_rotation["Unités Vendues (Période)"], denom_rot_unit, out=np.full_like(denom_rot_unit, np.inf, dtype=np.float64), where=denom_rot_unit!=0)
+        df_rotation["Rotation Unités (Proxy)"].fillna(0, inplace=True)
         df_rotation.loc[(df_rotation["Unités Vendues (Période)"] <= 0) & (denom_rot_unit <= 0), "Rotation Unités (Proxy)"] = 0.0
 
         # Calculate Value Turnover safely
         df_rotation["COGS (Période)"] = df_rotation["Unités Vendues (Période)"] * df_rotation["Tarif d'achat"]
         df_rotation["Valeur Stock Actuel (€)"] = df_rotation["Stock"] * df_rotation["Tarif d'achat"]
         denom_rot_val = df_rotation["Valeur Stock Actuel (€)"]
-        df_rotation["Rotation Valeur (Proxy)"] = np.divide(
-            df_rotation["COGS (Période)"], denom_rot_val,
-            out=np.full_like(denom_rot_val, np.inf, dtype=np.float64),
-            where=denom_rot_val!=0
-            )
-        df_rotation["Rotation Valeur (Proxy)"].fillna(0, inplace=True) # Handle potential 0/0 -> NaN
+        df_rotation["Rotation Valeur (Proxy)"] = np.divide(df_rotation["COGS (Période)"], denom_rot_val, out=np.full_like(denom_rot_val, np.inf, dtype=np.float64), where=denom_rot_val!=0)
+        df_rotation["Rotation Valeur (Proxy)"].fillna(0, inplace=True)
         df_rotation.loc[(df_rotation["COGS (Période)"] <= 0) & (denom_rot_val <= 0), "Rotation Valeur (Proxy)"] = 0.0
 
         return df_rotation
@@ -373,14 +367,28 @@ if 'df_initial_filtered' in st.session_state and st.session_state.df_initial_fil
         elif not semaine_columns: st.warning("Analyse impossible: Aucune colonne de ventes hebdomadaires valide identifiée.")
         else:
             st.markdown("#### Paramètres d'Analyse")
-            period_options = {"12 dernières semaines": 12, "52 dernières semaines": 52, "Tout l'historique": 0 }
-            selected_period_label = st.selectbox("📅 Période pour le calcul des ventes:", options=period_options.keys(), key="rotation_period_select")
-            selected_period_weeks = period_options[selected_period_label]
+            col1_rot, col2_rot = st.columns(2)
+            with col1_rot:
+                # Period Selection
+                period_options = {"12 dernières semaines": 12, "52 dernières semaines": 52, "Tout l'historique": 0 }
+                selected_period_label = st.selectbox("📅 Période calcul ventes:", options=period_options.keys(), key="rotation_period_select")
+                selected_period_weeks = period_options[selected_period_label]
+            with col2_rot:
+                # --- ADDED: Monthly Sales Threshold Input ---
+                rotation_threshold = st.number_input(
+                    "📉 Afficher produits avec ventes mensuelles <",
+                    min_value=0.0,
+                    value=1.0, # Default threshold
+                    step=0.1,
+                    format="%.1f", # Format for one decimal place
+                    key="rotation_threshold_input",
+                    help="N'afficher que les produits dont la vente moyenne mensuelle (calculée sur la période sélectionnée) est inférieure à cette valeur."
+                )
 
             if st.button("🔄 Analyser la Rotation", key="analyze_rotation_button"):
                  with st.spinner("Analyse en cours..."): df_rotation_result = calculer_rotation_stock(df_display_filtered, semaine_columns, selected_period_weeks)
                  if df_rotation_result is not None:
-                     st.success("✅ Analyse de rotation terminée."); st.session_state.rotation_result_df = df_rotation_result; st.session_state.rotation_period_label = selected_period_label # Store label too
+                     st.success("✅ Analyse de rotation terminée."); st.session_state.rotation_result_df = df_rotation_result; st.session_state.rotation_period_label = selected_period_label; st.session_state.rotation_threshold_value = rotation_threshold # Store threshold used
                      st.rerun() # Rerun to display results
                  else:
                       st.error("❌ L'analyse de rotation a échoué.")
@@ -389,101 +397,108 @@ if 'df_initial_filtered' in st.session_state and st.session_state.df_initial_fil
             # Display Rotation Results
             if 'rotation_result_df' in st.session_state and st.session_state.rotation_result_df is not None:
                 st.markdown("---"); st.markdown(f"#### Résultats de l'Analyse de Rotation ({st.session_state.get('rotation_period_label', '')})")
-                df_results_rot_orig = st.session_state.rotation_result_df # Get original results
+                df_results_rot_orig = st.session_state.rotation_result_df # Get original full results
+                threshold_display = st.session_state.get('rotation_threshold_value', 1.0) # Get threshold used for this display run
 
-                # Define columns to display for rotation - ADD Tarif d'achat
+                # --- Filter results based on the threshold ---
+                monthly_sales_col = "Ventes Moy Mensuel (Période)"
+                if monthly_sales_col in df_results_rot_orig.columns:
+                    # Ensure the column is numeric before filtering
+                    df_results_rot_orig[monthly_sales_col] = pd.to_numeric(df_results_rot_orig[monthly_sales_col], errors='coerce').fillna(0)
+                    # Apply the filter
+                    df_results_rot_filtered = df_results_rot_orig[df_results_rot_orig[monthly_sales_col] < threshold_display].copy()
+                    st.caption(f"Affichage des articles avec ventes moyennes mensuelles < {threshold_display:.1f} (sur la période). {len(df_results_rot_filtered)} / {len(df_results_rot_orig)} articles affichés.")
+                else:
+                    st.warning(f"Colonne '{monthly_sales_col}' non trouvée, impossible d'appliquer le filtre de seuil.")
+                    df_results_rot_filtered = df_results_rot_orig.copy() # Show all if column missing
+
+
+                # Define columns to display for rotation - ADD Tarif d'achat & Ventes Moy Mensuel
                 rotation_display_cols = [
                     "AF_RefFourniss", "Référence Article", "Désignation Article",
-                    "Tarif d'achat", # <-- ADDED Tarif d'achat here
+                    "Tarif d'achat", # Added Tarif d'achat
                     "Stock",
                     "Unités Vendues (Période)", "Ventes Moy Hebdo (Période)",
+                    "Ventes Moy Mensuel (Période)", # <-- ADDED Monthly Sales
                     "Semaines Stock (WoS)", "Rotation Unités (Proxy)",
                     "Valeur Stock Actuel (€)", "COGS (Période)", "Rotation Valeur (Proxy)"
                  ]
                 # Filter to only columns that actually exist in the results df
-                rotation_display_cols_final = [col for col in rotation_display_cols if col in df_results_rot_orig.columns]
+                rotation_display_cols_final = [col for col in rotation_display_cols if col in df_results_rot_filtered.columns] # Use filtered df for column check
 
-                if df_results_rot_orig.empty: st.info("Aucune donnée à afficher pour la rotation.")
+                if df_results_rot_filtered.empty:
+                    if not df_results_rot_orig.empty: # If original had data but filter removed all
+                        st.info(f"Aucun article ne correspond au critère de ventes mensuelles < {threshold_display:.1f}.")
+                    else: # Original calculation yielded nothing
+                        st.info("Aucune donnée de rotation calculée à afficher.")
+
                 elif not rotation_display_cols_final: st.error("Aucune colonne de résultat de rotation trouvée pour l'affichage.")
                 else:
-                    # --- Prepare for Display: Round, Replace inf, and Format ---
-                    df_rot_display_copy = df_results_rot_orig[rotation_display_cols_final].copy()
+                    # --- Prepare Filtered Data for Display: Round, Replace inf, and Format ---
+                    df_rot_display_copy = df_results_rot_filtered[rotation_display_cols_final].copy() # Use the FILTERED data
 
-                    # Define columns that might contain infinity AFTER calculation
-                    # inf_possible_cols = ["Semaines Stock (WoS)", "Rotation Unités (Proxy)", "Rotation Valeur (Proxy)"] # Not strictly needed anymore
-
-                    # Apply rounding BEFORE replacing inf, to numeric columns only
                     numeric_cols_to_round = {
                         "Tarif d'achat": 2,
                         "Ventes Moy Hebdo (Période)": 2,
-                        "Semaines Stock (WoS)": 1, # Round before potential inf replacement
-                        "Rotation Unités (Proxy)": 2, # Round before potential inf replacement
+                        "Ventes Moy Mensuel (Période)": 2, # Round monthly avg too
+                        "Semaines Stock (WoS)": 1,
+                        "Rotation Unités (Proxy)": 2,
                         "Valeur Stock Actuel (€)": 2,
                         "COGS (Période)": 2,
-                        "Rotation Valeur (Proxy)": 2 # Round before potential inf replacement
+                        "Rotation Valeur (Proxy)": 2
                     }
 
                     for col, decimals in numeric_cols_to_round.items():
                         if col in df_rot_display_copy.columns:
-                            # Ensure column is numeric before rounding, handle non-numeric gracefully
                              df_rot_display_copy[col] = pd.to_numeric(df_rot_display_copy[col], errors='coerce')
-                             # Only round if it's actually numeric after coercion
                              if pd.api.types.is_numeric_dtype(df_rot_display_copy[col]):
                                  df_rot_display_copy[col] = df_rot_display_copy[col].round(decimals)
 
-
-                    # Now replace infinity values with 'Inf' string AFTER rounding attempt
                     df_rot_display_copy.replace([np.inf, -np.inf], 'Inf', inplace=True)
 
-                    # Define format dictionary for styling
                     formatters = {
                         "Tarif d'achat": "{:,.2f}€",
                         "Stock": "{:,.0f}",
                         "Unités Vendues (Période)": "{:,.0f}",
                         "Ventes Moy Hebdo (Période)": "{:,.2f}",
-                        "Semaines Stock (WoS)": "{}", # Display as is (rounded number or 'Inf')
-                        "Rotation Unités (Proxy)": "{}", # Display as is (rounded number or 'Inf')
+                        "Ventes Moy Mensuel (Période)": "{:,.2f}", # Format monthly avg
+                        "Semaines Stock (WoS)": "{}",
+                        "Rotation Unités (Proxy)": "{}",
                         "Valeur Stock Actuel (€)": "{:,.2f}€",
                         "COGS (Période)": "{:,.2f}€",
-                        "Rotation Valeur (Proxy)": "{}", # Display as is (rounded number or 'Inf')
+                        "Rotation Valeur (Proxy)": "{}"
                     }
 
-                    # Apply formatting using the defined formatters
-                    st.dataframe(df_rot_display_copy.style.format(
-                        formatters, na_rep="-", thousands=","
-                        )
-                    )
+                    st.dataframe(df_rot_display_copy.style.format(formatters, na_rep="-", thousands=","))
 
-                # Export Rotation Data
-                st.markdown("#### Exportation de l'Analyse")
-                if not df_results_rot_orig.empty:
+
+                # Export Rotation Data (Export FULL unfiltered results)
+                st.markdown("#### Exportation de l'Analyse Complète")
+                if not df_results_rot_orig.empty: # Export based on original results
                      output_rot = io.BytesIO()
-                     # ADD Tarif d'achat to export columns list if it's not already implicitly included
-                     export_rot_cols_base = ["AF_RefFourniss", "Référence Article", "Désignation Article", "Tarif d'achat", "Stock", "Unités Vendues (Période)", "Ventes Moy Hebdo (Période)", "Semaines Stock (WoS)", "Rotation Unités (Proxy)", "Valeur Stock Actuel (€)", "COGS (Période)", "Rotation Valeur (Proxy)"]
+                     # Include 'Ventes Moy Mensuel' in export
+                     export_rot_cols_base = ["AF_RefFourniss", "Référence Article", "Désignation Article", "Tarif d'achat", "Stock", "Unités Vendues (Période)", "Ventes Moy Hebdo (Période)", "Ventes Moy Mensuel (Période)", "Semaines Stock (WoS)", "Rotation Unités (Proxy)", "Valeur Stock Actuel (€)", "COGS (Période)", "Rotation Valeur (Proxy)"]
                      export_rot_cols_with_fourn = ["Fournisseur"] + export_rot_cols_base if "Fournisseur" in df_results_rot_orig.columns else export_rot_cols_base
-                     # Ensure only existing columns are selected
                      export_rot_cols_final = [col for col in export_rot_cols_with_fourn if col in df_results_rot_orig.columns]
 
-                     # Use original df for export, round relevant columns, replace inf
                      df_export_rot = df_results_rot_orig[export_rot_cols_final].copy()
 
                      # Round numeric columns for export
-                     for col, decimals in numeric_cols_to_round.items():
+                     for col, decimals in numeric_cols_to_round.items(): # Use same rounding dict
                           if col in df_export_rot.columns:
                               df_export_rot[col] = pd.to_numeric(df_export_rot[col], errors='coerce')
                               if pd.api.types.is_numeric_dtype(df_export_rot[col]):
                                  df_export_rot[col] = df_export_rot[col].round(decimals)
 
-                     # Replace inf AFTER rounding for export
-                     df_export_rot.replace([np.inf, -np.inf], 'Infini', inplace=True) # Use 'Infini' string for export
+                     df_export_rot.replace([np.inf, -np.inf], 'Infini', inplace=True)
 
                      with pd.ExcelWriter(output_rot, engine="openpyxl") as writer_rot:
-                         df_export_rot.to_excel(writer_rot, sheet_name="Analyse_Rotation", index=False)
+                         df_export_rot.to_excel(writer_rot, sheet_name="Analyse_Rotation_Complete", index=False) # Changed sheet name slightly
                      output_rot.seek(0)
 
                      suppliers_export_rot = st.session_state.get('selected_fournisseurs_session', [])
-                     fname_rot = f"analyse_rotation_{'multiples' if len(suppliers_export_rot)>1 else sanitize_sheet_name(suppliers_export_rot[0] if suppliers_export_rot else 'NA')}_{pd.Timestamp.now().strftime('%Y%m%d_%H%M')}.xlsx"
-                     st.download_button(label="📥 Télécharger Analyse Rotation", data=output_rot, file_name=fname_rot, mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key="download_rot_btn")
+                     fname_rot = f"analyse_rotation_complete_{'multiples' if len(suppliers_export_rot)>1 else sanitize_sheet_name(suppliers_export_rot[0] if suppliers_export_rot else 'NA')}_{pd.Timestamp.now().strftime('%Y%m%d_%H%M')}.xlsx"
+                     st.download_button(label="📥 Télécharger Analyse Complète", data=output_rot, file_name=fname_rot, mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key="download_rot_btn")
                 else: st.info("Aucune donnée de rotation à exporter.")
 
 
