@@ -312,7 +312,11 @@ if 'df_initial_filtered' in st.session_state and st.session_state.df_initial_fil
              if selected_fournisseurs:
                  st.warning("Aucun article trouvé pour le(s) fournisseur(s) sélectionné(s).")
              else:
-                 st.info("Veuillez sélectionner au moins un fournisseur dans la barre latérale.")
+                 # Show this message if df_base_filtered itself was empty OR no suppliers selected
+                 if not fournisseurs_list:
+                      st.info("Aucun fournisseur valide trouvé dans le fichier après filtrage initial.")
+                 else:
+                      st.info("Veuillez sélectionner au moins un fournisseur dans la barre latérale.")
         elif not semaine_columns:
             st.warning("Impossible de calculer: Aucune colonne de ventes valide identifiée.")
         else:
@@ -323,15 +327,16 @@ if 'df_initial_filtered' in st.session_state and st.session_state.df_initial_fil
                 with st.spinner("Calcul..."): result_cmd = calculer_quantite_a_commander(df_display_filtered, semaine_columns, montant_minimum_input_cmd, duree_semaines_cmd)
                 if result_cmd:
                     st.success("✅ Calcul OK."); (q_calc, vN1, v12N1, v12l, mt_calc) = result_cmd; df_res_cmd = df_display_filtered.copy()
-                    df_res_cmd.loc[:, "Qte Cmdée"] = q_calc; df_res_cmd.loc[:, "Vts N-1"] = vN1; df_res_cmd.loc[:, "Vts 12 N-1"] = v12N1; df_res_cmd.loc[:, "Vts 12 Dern."] = v12l
-                    df_res_cmd.loc[:, "Tarif Ach."] = pd.to_numeric(df_res_cmd["Tarif d'achat"], errors='coerce').fillna(0); df_res_cmd.loc[:, "Total Cmd"] = df_res_cmd["Tarif Ach."] * df_res_cmd["Qte Cmdée"]; df_res_cmd.loc[:, "Stock Terme"] = df_res_cmd["Stock"] + df_res_cmd["Qte Cmdée"]
+                    # Use simplified column names for results assignment for clarity
+                    df_res_cmd["Qte Cmdée"] = q_calc; df_res_cmd["Vts N-1 Total"] = vN1; df_res_cmd["Vts 12 N-1 Sim"] = v12N1; df_res_cmd["Vts 12 Dern."] = v12l
+                    df_res_cmd["Tarif Ach."] = pd.to_numeric(df_res_cmd["Tarif d'achat"], errors='coerce').fillna(0); df_res_cmd["Total Cmd"] = df_res_cmd["Tarif Ach."] * df_res_cmd["Qte Cmdée"]; df_res_cmd["Stock Terme"] = df_res_cmd["Stock"] + df_res_cmd["Qte Cmdée"]
                     st.session_state.calc_res_df = df_res_cmd; st.session_state.mt_calc = mt_calc; st.session_state.sel_fourn_calc_cmd = selected_fournisseurs; st.rerun()
                 else: st.error("❌ Calcul échoué.");
             if 'calc_res_df' in st.session_state and st.session_state.calc_res_df is not None:
                 if st.session_state.sel_fourn_calc_cmd == selected_fournisseurs:
                     st.markdown("---"); st.markdown("#### Résultats Commande"); df_cmd_disp = st.session_state.calc_res_df; mt_cmd_disp = st.session_state.mt_calc; sup_cmd_disp = st.session_state.sel_fourn_calc_cmd
                     st.metric(label="💰 Montant Total", value=f"{mt_cmd_disp:,.2f} €")
-                    # CORRECTED Indentation for Min Warning
+                    # CORRECTED Indentation Min Warning
                     if len(sup_cmd_disp) == 1:
                         sup_cmd = sup_cmd_disp[0]
                         if sup_cmd in min_order_dict:
@@ -339,18 +344,19 @@ if 'df_initial_filtered' in st.session_state and st.session_state.df_initial_fil
                             if "Total Cmd" in df_cmd_disp.columns:
                                 act_tot = df_cmd_disp["Total Cmd"].sum()
                                 if req_min > 0 and act_tot < req_min:
-                                    diff = req_min - act_tot
-                                    st.warning(f"⚠️ **Min Non Atteint ({sup_cmd})**\nMontant: **{act_tot:,.2f}€** | Requis: **{req_min:,.2f}€** (Manque: {diff:,.2f}€)\n➡️ Suggestion: Modifiez 'Montant min global (€)' et relancez.")
-                            else:
-                                 logging.warning("Colonne 'Total Cmd' non trouvée pour vérif min.")
-                    cols_req = ["Fournisseur", "AF_RefFourniss", "Référence Article", "Désignation Article", "Stock"]; cols_base = cols_req + ["Vts N-1", "Vts 12 N-1", "Vts 12 Dern.", "Conditionnement", "Qte Cmdée", "Stock Terme", "Tarif Ach.", "Total Cmd"]
+                                    diff = req_min - act_tot; st.warning(f"⚠️ **Min Non Atteint ({sup_cmd})**\nMontant: **{act_tot:,.2f}€** | Requis: **{req_min:,.2f}€** (Manque: {diff:,.2f}€)")
+                            else: logging.warning("Col 'Total Cmd' absente.")
+
+                    # Display Table using simplified result column names
+                    cols_req = ["Fournisseur", "AF_RefFourniss", "Référence Article", "Désignation Article", "Stock"]; cols_base = cols_req + ["Vts N-1 Total", "Vts 12 N-1 Sim", "Vts 12 Dern.", "Conditionnement", "Qte Cmdée", "Stock Terme", "Tarif Ach.", "Total Cmd"]
                     cols_disp = [c for c in cols_base if c in df_cmd_disp.columns];
                     if any(c not in df_cmd_disp.columns for c in cols_req): st.error("❌ Cols manquantes affichage.")
-                    else: st.dataframe(df_cmd_disp[cols_disp].style.format({"Tarif Ach.": "{:,.2f}€", "Total Cmd": "{:,.2f}€", "Vts N-1": "{:,.0f}", "Vts 12 N-1": "{:,.0f}", "Vts 12 Dern.": "{:,.0f}", "Stock": "{:,.0f}", "Conditionnement": "{:,.0f}", "Qte Cmdée": "{:,.0f}", "Stock Terme": "{:,.0f}"}, na_rep="-", thousands=","))
+                    else: st.dataframe(df_cmd_disp[cols_disp].style.format({"Tarif Ach.": "{:,.2f}€", "Total Cmd": "{:,.2f}€", "Vts N-1 Total": "{:,.0f}", "Vts 12 N-1 Sim": "{:,.0f}", "Vts 12 Dern.": "{:,.0f}", "Stock": "{:,.0f}", "Conditionnement": "{:,.0f}", "Qte Cmdée": "{:,.0f}", "Stock Terme": "{:,.0f}"}, na_rep="-", thousands=","))
+
                     st.markdown("#### Export Commande"); df_exp_cmd = df_cmd_disp[df_cmd_disp["Qte Cmdée"] > 0].copy()
                     if not df_exp_cmd.empty:
                          out_cmd = io.BytesIO(); sheets_cr_cmd = 0
-                         try: # Export logic (condensed)
+                         try: # Export logic
                              with pd.ExcelWriter(out_cmd, engine="openpyxl") as writer_cmd:
                                  qty_c, price_c, tot_c = "Qte Cmdée", "Tarif Ach.", "Total Cmd"; export_cols_cmd = [c for c in cols_disp if c != 'Fournisseur']; formula_ok = False
                                  if all(c in export_cols_cmd for c in [qty_c, price_c, tot_c]):
@@ -363,14 +369,21 @@ if 'df_initial_filtered' in st.session_state and st.session_state.df_initial_fil
                                              df_sh_data = df_sup_exp[export_cols_cmd].copy(); n_rows = len(df_sh_data); tot_v = df_sh_data[tot_c].sum(); req_m = min_order_dict.get(sup_exp, 0); min_f = f"{req_m:,.2f}€" if req_m > 0 else "N/A"
                                              lbl_c = "Désignation Article" if "Désignation Article" in export_cols_cmd else export_cols_cmd[1]; tot_r = {c: "" for c in export_cols_cmd}; tot_r[lbl_c] = "TOTAL"; tot_r[tot_c] = tot_v; min_r = {c: "" for c in export_cols_cmd}; min_r[lbl_c] = "Min Requis"; min_r[tot_c] = min_f
                                              df_sh = pd.concat([df_sh_data, pd.DataFrame([tot_r]), pd.DataFrame([min_r])], ignore_index=True); s_name = sanitize_sheet_name(sup_exp)
-                                             try: df_sh.to_excel(writer_cmd, sheet_name=s_name, index=False); ws = writer_cmd.sheets[s_name];
+                                             try: # Write sheet and formulas
+                                                 df_sh.to_excel(writer_cmd, sheet_name=s_name, index=False); ws = writer_cmd.sheets[s_name];
+                                                 # Apply formulas (Corrected Indentation)
                                                  for r in range(2, n_rows + 2): form = f"={qty_l}{r}*{price_l}{r}"; cell = ws[f"{tot_l}{r}"]; cell.value = form; cell.number_format = '#,##0.00€'
-                                                 if n_rows > 0: sum_form = f"=SUM({tot_l}2:{tot_l}{n_rows + 1})"; s_cell = ws[f"{tot_l}{n_rows + 2}"]; s_cell.value = sum_form; s_cell.number_format = '#,##0.00€'
+                                                 # Apply SUM formula (Corrected Indentation)
+                                                 total_formula_row_cmd = n_rows + 2
+                                                 if n_rows > 0: sum_form = f"=SUM({tot_l}2:{tot_l}{n_rows + 1})"; s_cell = ws[f"{tot_l}{total_formula_row_cmd}"]; s_cell.value = sum_form; s_cell.number_format = '#,##0.00€'
+                                                 # Increment count (Corrected Indentation)
                                                  sheets_cr_cmd += 1
                                              except Exception as we: logging.exception(f"Err sheet {s_name}:{we}")
-                             out_cmd.seek(0); fname = f"commande_{'multi' if len(sup_cmd_disp)>1 else sanitize_sheet_name(sup_cmd_disp[0])}_{pd.Timestamp.now():%Y%m%d_%H%M}.xlsx"
-                             if sheets_cr_cmd > 0: st.download_button(f"📥 Télécharger ({sheets_cr_cmd})", out_cmd, fname, key="dl_cmd_btn")
+                                 else: st.error("Export CMD: Erreur identification colonnes formules.")
                          except Exception as e_w: logging.exception(f"Err writer:{e_w}")
+                         if sheets_cr_cmd > 0:
+                              out_cmd.seek(0); fname = f"commande_{'multi' if len(sup_cmd_disp)>1 else sanitize_sheet_name(sup_cmd_disp[0])}_{pd.Timestamp.now():%Y%m%d_%H%M}.xlsx"
+                              st.download_button(f"📥 Télécharger ({sheets_cr_cmd})", out_cmd, fname, key="dl_cmd_btn")
                     else: st.info("Aucune qté > 0 à exporter.")
                 else: st.info("Résultats précédents invalidés. Relancez calcul.")
 
@@ -488,9 +501,9 @@ if 'df_initial_filtered' in st.session_state and st.session_state.df_initial_fil
                         for c in n1m_cols: fcst_fmters[c] = "{:,.0f}";
                         for c in mq_cols: fcst_fmters[c] = "{:,.0f}";
                         for c in ma_cols: fcst_fmters[c] = "{:,.2f}€"
-                        fcst_fmters_final = {k: v for k, v in fcst_fmters.items() if k in fcst_disp_fin} # Filter formatters
+                        fcst_fmters_final = {k: v for k, v in fcst_fmters.items() if k in fcst_disp_fin}
                         try: st.dataframe(df_fcst_disp[fcst_disp_fin].style.format(fcst_fmters_final, na_rep="-", thousands=","))
-                        except Exception as e_fmt: st.error(f"Erreur formatage affichage: {e_fmt}"); st.dataframe(df_fcst_disp[fcst_disp_fin]) # Display raw on format error
+                        except Exception as e_fmt: st.error(f"Erreur formatage affichage: {e_fmt}"); st.dataframe(df_fcst_disp[fcst_disp_fin])
                         st.markdown("#### Export Simulation"); out_f = io.BytesIO(); df_exp_f = df_fcst_disp[fcst_disp_fin].copy()
                         try:
                             with pd.ExcelWriter(out_f, engine="openpyxl") as w_f: df_exp_f.to_excel(w_f, sheet_name=f"Forecast_{sim_t.replace(' ','_')}", index=False)
