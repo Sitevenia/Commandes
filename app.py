@@ -115,7 +115,7 @@ def calculer_rotation_stock(df, semaine_columns, periode_semaines):
         df_rotation["Unités Vendues (Période)"] = df_rotation[semaines_analyse].sum(axis=1)
         df_rotation["Ventes Moy Hebdo (Période)"] = df_rotation["Unités Vendues (Période)"] / nb_semaines_analyse if nb_semaines_analyse > 0 else 0.0
 
-        # --- Calculate Average Monthly Sales ---
+        # Calculate Average Monthly Sales
         avg_weeks_per_month = 52 / 12
         df_rotation["Ventes Moy Mensuel (Période)"] = df_rotation["Ventes Moy Hebdo (Période)"] * avg_weeks_per_month
 
@@ -170,9 +170,10 @@ if 'semaine_columns' not in st.session_state: st.session_state.semaine_columns =
 if 'calculation_result_df' not in st.session_state: st.session_state.calculation_result_df = None
 if 'rotation_result_df' not in st.session_state: st.session_state.rotation_result_df = None
 if 'selected_fournisseurs_session' not in st.session_state: st.session_state.selected_fournisseurs_session = []
-
+if 'rotation_threshold_value' not in st.session_state: st.session_state.rotation_threshold_value = 1.0 # Default threshold
 
 # --- Data Loading and Initial Processing ---
+# This block runs only when a new file is uploaded and df_full is not yet in session_state
 if uploaded_file and st.session_state.df_full is None:
     logging.info(f"New file uploaded: {uploaded_file.name}. Processing...")
     try:
@@ -230,6 +231,7 @@ if uploaded_file and st.session_state.df_full is None:
 
 
 # --- Main App UI (Tabs) ---
+# Proceed only if the base data has been loaded and processed into session state
 if 'df_initial_filtered' in st.session_state and st.session_state.df_initial_filtered is not None:
 
     df_base_filtered = st.session_state.df_initial_filtered
@@ -362,92 +364,96 @@ if 'df_initial_filtered' in st.session_state and st.session_state.df_initial_fil
     with tab2:
         st.header("Analyse de la Rotation des Stocks")
 
+        # --- Initial Checks ---
+        data_available_for_analysis = (selected_fournisseurs and not df_display_filtered.empty and semaine_columns)
+
         if not selected_fournisseurs: st.info("Veuillez sélectionner au moins un fournisseur dans la barre latérale pour activer cette section.")
         elif df_display_filtered.empty and selected_fournisseurs: st.warning("Aucun article trouvé pour le(s) fournisseur(s) sélectionné(s).")
         elif not semaine_columns: st.warning("Analyse impossible: Aucune colonne de ventes hebdomadaires valide identifiée.")
         else:
+            # --- Analysis Parameters ---
             st.markdown("#### Paramètres d'Analyse")
             col1_rot, col2_rot = st.columns(2)
             with col1_rot:
-                # Period Selection
                 period_options = {"12 dernières semaines": 12, "52 dernières semaines": 52, "Tout l'historique": 0 }
                 selected_period_label = st.selectbox("📅 Période calcul ventes:", options=period_options.keys(), key="rotation_period_select")
                 selected_period_weeks = period_options[selected_period_label]
             with col2_rot:
-                # --- ADDED: Monthly Sales Threshold Input ---
+                # Monthly Sales Threshold Input
                 rotation_threshold = st.number_input(
                     "📉 Afficher produits avec ventes mensuelles <",
                     min_value=0.0,
-                    value=1.0, # Default threshold
-                    step=0.1,
-                    format="%.1f", # Format for one decimal place
-                    key="rotation_threshold_input",
+                    value=st.session_state.get('rotation_threshold_value', 1.0), # Persist threshold value
+                    step=0.1, format="%.1f", key="rotation_threshold_input",
                     help="N'afficher que les produits dont la vente moyenne mensuelle (calculée sur la période sélectionnée) est inférieure à cette valeur."
                 )
+                # Store the current threshold value in session state immediately
+                st.session_state.rotation_threshold_value = rotation_threshold
 
+            # --- Analysis Button ---
             if st.button("🔄 Analyser la Rotation", key="analyze_rotation_button"):
                  with st.spinner("Analyse en cours..."): df_rotation_result = calculer_rotation_stock(df_display_filtered, semaine_columns, selected_period_weeks)
                  if df_rotation_result is not None:
-                     st.success("✅ Analyse de rotation terminée."); st.session_state.rotation_result_df = df_rotation_result; st.session_state.rotation_period_label = selected_period_label; st.session_state.rotation_threshold_value = rotation_threshold # Store threshold used
-                     st.rerun() # Rerun to display results
+                     st.success("✅ Analyse de rotation terminée.");
+                     st.session_state.rotation_result_df = df_rotation_result # Store FULL results
+                     st.session_state.rotation_period_label = selected_period_label # Store label used for this run
+                     # Threshold is already stored via its own key's callback mechanism
+                     st.rerun() # Rerun to display results based on stored data and current threshold
                  else:
                       st.error("❌ L'analyse de rotation a échoué.")
                       if 'rotation_result_df' in st.session_state: del st.session_state.rotation_result_df
 
-            # Display Rotation Results
+            # --- Display Rotation Results (Filtered) ---
             if 'rotation_result_df' in st.session_state and st.session_state.rotation_result_df is not None:
                 st.markdown("---"); st.markdown(f"#### Résultats de l'Analyse de Rotation ({st.session_state.get('rotation_period_label', '')})")
-                df_results_rot_orig = st.session_state.rotation_result_df # Get original full results
-                threshold_display = st.session_state.get('rotation_threshold_value', 1.0) # Get threshold used for this display run
+                df_results_rot_orig = st.session_state.rotation_result_df # Get original FULL results
+                threshold_display = st.session_state.get('rotation_threshold_value', 1.0) # Get current threshold from widget state
 
-                # --- Filter results based on the threshold ---
+                # --- Filter logic ---
                 monthly_sales_col = "Ventes Moy Mensuel (Période)"
+                df_results_rot_filtered = pd.DataFrame(columns=df_results_rot_orig.columns) # Initialize as empty
+                can_filter = False
+                filter_error_msg = ""
+
                 if monthly_sales_col in df_results_rot_orig.columns:
-                    # Ensure the column is numeric before filtering
-                    df_results_rot_orig[monthly_sales_col] = pd.to_numeric(df_results_rot_orig[monthly_sales_col], errors='coerce').fillna(0)
-                    # Apply the filter
-                    df_results_rot_filtered = df_results_rot_orig[df_results_rot_orig[monthly_sales_col] < threshold_display].copy()
-                    st.caption(f"Affichage des articles avec ventes moyennes mensuelles < {threshold_display:.1f} (sur la période). {len(df_results_rot_filtered)} / {len(df_results_rot_orig)} articles affichés.")
+                    # Ensure column is numeric before filtering (on the original data)
+                    # Create a temporary series for filtering to avoid modifying original state data here
+                    monthly_sales_series = pd.to_numeric(df_results_rot_orig[monthly_sales_col], errors='coerce').fillna(0)
+                    can_filter = True
                 else:
-                    st.warning(f"Colonne '{monthly_sales_col}' non trouvée, impossible d'appliquer le filtre de seuil.")
+                    filter_error_msg = f"Colonne '{monthly_sales_col}' non trouvée, impossible d'appliquer le filtre."
                     df_results_rot_filtered = df_results_rot_orig.copy() # Show all if column missing
 
+                # Apply filter only if possible
+                if can_filter:
+                    try:
+                        # Use the temporary numeric series for comparison
+                        df_results_rot_filtered = df_results_rot_orig[monthly_sales_series < threshold_display].copy()
+                        st.caption(f"Filtre appliqué : Ventes moyennes mensuelles < {threshold_display:.1f}. {len(df_results_rot_filtered)} / {len(df_results_rot_orig)} articles affichés.")
+                    except Exception as e_filter_rot:
+                        filter_error_msg = f"Erreur lors de l'application du filtre : {e_filter_rot}"
+                        logging.error(f"Error filtering rotation results: {e_filter_rot}")
+                        df_results_rot_filtered = df_results_rot_orig.copy() # Show all on filter error
+                elif filter_error_msg: # Show error only if filtering was attempted but failed
+                     st.warning(filter_error_msg + " Tous les résultats sont affichés.")
 
-                # Define columns to display for rotation - ADD Tarif d'achat & Ventes Moy Mensuel
-                rotation_display_cols = [
-                    "AF_RefFourniss", "Référence Article", "Désignation Article",
-                    "Tarif d'achat", # Added Tarif d'achat
-                    "Stock",
-                    "Unités Vendues (Période)", "Ventes Moy Hebdo (Période)",
-                    "Ventes Moy Mensuel (Période)", # <-- ADDED Monthly Sales
-                    "Semaines Stock (WoS)", "Rotation Unités (Proxy)",
-                    "Valeur Stock Actuel (€)", "COGS (Période)", "Rotation Valeur (Proxy)"
-                 ]
-                # Filter to only columns that actually exist in the results df
-                rotation_display_cols_final = [col for col in rotation_display_cols if col in df_results_rot_filtered.columns] # Use filtered df for column check
+
+                # --- Display the FILTERED DataFrame ---
+                # Define columns to display (check against the *filtered* df now)
+                rotation_display_cols = ["AF_RefFourniss", "Référence Article", "Désignation Article", "Tarif d'achat", "Stock", "Unités Vendues (Période)", "Ventes Moy Hebdo (Période)", "Ventes Moy Mensuel (Période)", "Semaines Stock (WoS)", "Rotation Unités (Proxy)", "Valeur Stock Actuel (€)", "COGS (Période)", "Rotation Valeur (Proxy)"]
+                rotation_display_cols_final = [col for col in rotation_display_cols if col in df_results_rot_filtered.columns] # Use FILTERED df
 
                 if df_results_rot_filtered.empty:
-                    if not df_results_rot_orig.empty: # If original had data but filter removed all
+                    if not df_results_rot_orig.empty and can_filter: # If original had data but filter removed all
                         st.info(f"Aucun article ne correspond au critère de ventes mensuelles < {threshold_display:.1f}.")
-                    else: # Original calculation yielded nothing
-                        st.info("Aucune donnée de rotation calculée à afficher.")
+                    # Removed redundant 'else' conditions as they might show misleading messages if filter failed
 
-                elif not rotation_display_cols_final: st.error("Aucune colonne de résultat de rotation trouvée pour l'affichage.")
+                elif not rotation_display_cols_final: st.error("Aucune colonne de résultat de rotation trouvée pour l'affichage après filtrage.")
                 else:
-                    # --- Prepare Filtered Data for Display: Round, Replace inf, and Format ---
-                    df_rot_display_copy = df_results_rot_filtered[rotation_display_cols_final].copy() # Use the FILTERED data
+                    # Prepare FILTERED data for display: Round, Replace inf, and Format
+                    df_rot_display_copy = df_results_rot_filtered[rotation_display_cols_final].copy() # Use FILTERED data
 
-                    numeric_cols_to_round = {
-                        "Tarif d'achat": 2,
-                        "Ventes Moy Hebdo (Période)": 2,
-                        "Ventes Moy Mensuel (Période)": 2, # Round monthly avg too
-                        "Semaines Stock (WoS)": 1,
-                        "Rotation Unités (Proxy)": 2,
-                        "Valeur Stock Actuel (€)": 2,
-                        "COGS (Période)": 2,
-                        "Rotation Valeur (Proxy)": 2
-                    }
-
+                    numeric_cols_to_round = {"Tarif d'achat": 2, "Ventes Moy Hebdo (Période)": 2, "Ventes Moy Mensuel (Période)": 2, "Semaines Stock (WoS)": 1, "Rotation Unités (Proxy)": 2, "Valeur Stock Actuel (€)": 2, "COGS (Période)": 2, "Rotation Valeur (Proxy)": 2}
                     for col, decimals in numeric_cols_to_round.items():
                         if col in df_rot_display_copy.columns:
                              df_rot_display_copy[col] = pd.to_numeric(df_rot_display_copy[col], errors='coerce')
@@ -455,51 +461,42 @@ if 'df_initial_filtered' in st.session_state and st.session_state.df_initial_fil
                                  df_rot_display_copy[col] = df_rot_display_copy[col].round(decimals)
 
                     df_rot_display_copy.replace([np.inf, -np.inf], 'Inf', inplace=True)
-
-                    formatters = {
-                        "Tarif d'achat": "{:,.2f}€",
-                        "Stock": "{:,.0f}",
-                        "Unités Vendues (Période)": "{:,.0f}",
-                        "Ventes Moy Hebdo (Période)": "{:,.2f}",
-                        "Ventes Moy Mensuel (Période)": "{:,.2f}", # Format monthly avg
-                        "Semaines Stock (WoS)": "{}",
-                        "Rotation Unités (Proxy)": "{}",
-                        "Valeur Stock Actuel (€)": "{:,.2f}€",
-                        "COGS (Période)": "{:,.2f}€",
-                        "Rotation Valeur (Proxy)": "{}"
-                    }
-
+                    formatters = {"Tarif d'achat": "{:,.2f}€", "Stock": "{:,.0f}", "Unités Vendues (Période)": "{:,.0f}", "Ventes Moy Hebdo (Période)": "{:,.2f}", "Ventes Moy Mensuel (Période)": "{:,.2f}", "Semaines Stock (WoS)": "{}", "Rotation Unités (Proxy)": "{}", "Valeur Stock Actuel (€)": "{:,.2f}€", "COGS (Période)": "{:,.2f}€", "Rotation Valeur (Proxy)": "{}"}
                     st.dataframe(df_rot_display_copy.style.format(formatters, na_rep="-", thousands=","))
 
 
-                # Export Rotation Data (Export FULL unfiltered results)
-                st.markdown("#### Exportation de l'Analyse Complète")
-                if not df_results_rot_orig.empty: # Export based on original results
+                # --- Export Rotation Data (Exports FILTERED results) ---
+                st.markdown("#### Exportation de l'Analyse Filtrée")
+                # Condition export button on filtered results existing
+                if not df_results_rot_filtered.empty:
                      output_rot = io.BytesIO()
-                     # Include 'Ventes Moy Mensuel' in export
                      export_rot_cols_base = ["AF_RefFourniss", "Référence Article", "Désignation Article", "Tarif d'achat", "Stock", "Unités Vendues (Période)", "Ventes Moy Hebdo (Période)", "Ventes Moy Mensuel (Période)", "Semaines Stock (WoS)", "Rotation Unités (Proxy)", "Valeur Stock Actuel (€)", "COGS (Période)", "Rotation Valeur (Proxy)"]
-                     export_rot_cols_with_fourn = ["Fournisseur"] + export_rot_cols_base if "Fournisseur" in df_results_rot_orig.columns else export_rot_cols_base
-                     export_rot_cols_final = [col for col in export_rot_cols_with_fourn if col in df_results_rot_orig.columns]
+                     export_rot_cols_with_fourn = ["Fournisseur"] + export_rot_cols_base if "Fournisseur" in df_results_rot_filtered.columns else export_rot_cols_base
+                     export_rot_cols_final = [col for col in export_rot_cols_with_fourn if col in df_results_rot_filtered.columns] # Use Filtered DF for columns
 
-                     df_export_rot = df_results_rot_orig[export_rot_cols_final].copy()
+                     # Use FILTERED df for export, round relevant columns, replace inf
+                     df_export_rot = df_results_rot_filtered[export_rot_cols_final].copy()
 
-                     # Round numeric columns for export
-                     for col, decimals in numeric_cols_to_round.items(): # Use same rounding dict
+                     # Re-use rounding dictionary
+                     for col, decimals in numeric_cols_to_round.items():
                           if col in df_export_rot.columns:
                               df_export_rot[col] = pd.to_numeric(df_export_rot[col], errors='coerce')
                               if pd.api.types.is_numeric_dtype(df_export_rot[col]):
                                  df_export_rot[col] = df_export_rot[col].round(decimals)
 
-                     df_export_rot.replace([np.inf, -np.inf], 'Infini', inplace=True)
+                     df_export_rot.replace([np.inf, -np.inf], 'Infini', inplace=True) # Replace inf AFTER rounding
 
                      with pd.ExcelWriter(output_rot, engine="openpyxl") as writer_rot:
-                         df_export_rot.to_excel(writer_rot, sheet_name="Analyse_Rotation_Complete", index=False) # Changed sheet name slightly
+                         df_export_rot.to_excel(writer_rot, sheet_name=f"Rotation_Filtree_{threshold_display:.1f}", index=False)
                      output_rot.seek(0)
 
                      suppliers_export_rot = st.session_state.get('selected_fournisseurs_session', [])
-                     fname_rot = f"analyse_rotation_complete_{'multiples' if len(suppliers_export_rot)>1 else sanitize_sheet_name(suppliers_export_rot[0] if suppliers_export_rot else 'NA')}_{pd.Timestamp.now().strftime('%Y%m%d_%H%M')}.xlsx"
-                     st.download_button(label="📥 Télécharger Analyse Complète", data=output_rot, file_name=fname_rot, mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key="download_rot_btn")
-                else: st.info("Aucune donnée de rotation à exporter.")
+                     fname_rot = f"analyse_rotation_filtree{threshold_display:.1f}_{'multiples' if len(suppliers_export_rot)>1 else sanitize_sheet_name(suppliers_export_rot[0] if suppliers_export_rot else 'NA')}_{pd.Timestamp.now().strftime('%Y%m%d_%H%M')}.xlsx"
+                     st.download_button(label=f"📥 Télécharger Analyse Filtrée (<{threshold_display:.1f}/mois)", data=output_rot, file_name=fname_rot, mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key="download_rot_btn")
+                elif not df_results_rot_orig.empty: # Filter removed all, but orig data exists
+                     st.info(f"Aucune donnée de rotation correspondant au filtre (<{threshold_display:.1f}/mois) à exporter.")
+                else: # No original data
+                     st.info("Aucune donnée de rotation calculée à exporter.")
 
 
 # --- App footer/initial message ---
