@@ -123,9 +123,6 @@ def calculer_rotation_stock(df, semaine_columns, periode_semaines):
     except KeyError as e: st.error(f"Erreur clé calc rotation: '{e}'."); return None
     except Exception as e: st.error(f"Erreur inattendue calc rotation: {e}"); logging.exception("Error calc rotation:"); return None
 
-# ==============================================================================
-# --- Forecast Simulation Calculation Function ---
-# ==============================================================================
 def approx_weeks_to_months(week_columns_52):
     """Approximates month mapping for 52 consecutive week columns."""
     month_map = {}; weeks_per_month_approx = 52 / 12
@@ -136,126 +133,71 @@ def approx_weeks_to_months(week_columns_52):
     return month_map
 
 def calculer_forecast_simulation(df, all_semaine_columns, selected_months, sim_type, progression_pct=0, objectif_montant=0):
-    """
-    Performs forecast simulation for SELECTED MONTHS based on corresponding N-1 data.
-    'Objectif Montant' now distributes based on N-1 QTY seasonality within the selected period.
-    Assumes N-1 is represented by columns from index -104 to -52.
-    """
+    """ Performs forecast simulation for SELECTED MONTHS based on corresponding N-1 data. """
     try:
         if not isinstance(df, pd.DataFrame) or df.empty: st.warning("Aucune donnée pour simulation."); return None
         if len(all_semaine_columns) < 104: st.error("Données historiques insuffisantes (< 104 semaines) pour N-1."); return None
         if not selected_months: st.warning("Veuillez sélectionner au moins un mois."); return None
-
         required_cols = ["Référence Article", "Désignation Article", "Conditionnement", "Tarif d'achat"]
         if not all(col in df.columns for col in required_cols): missing = [col for col in required_cols if col not in df.columns]; st.error(f"Colonnes manquantes simulation : {', '.join(missing)}"); return None
 
         df_sim = df[required_cols + ["Fournisseur"]].copy()
         df_sim["Tarif d'achat"] = pd.to_numeric(df_sim["Tarif d'achat"], errors='coerce').fillna(0)
         df_sim["Conditionnement"] = pd.to_numeric(df_sim["Conditionnement"], errors='coerce').fillna(1).apply(lambda x: 1 if x<=0 else int(x))
-
-        # --- 1. Identify N-1 Weeks and Map to Months ---
         n1_week_cols = all_semaine_columns[-104:-52]
         logging.info(f"Forecast Sim: Using N-1 columns from index -104 to -52.")
         if not all(col in df.columns for col in n1_week_cols): st.error("Erreur interne: Colonnes N-1 manquantes."); return None
         df_n1_sales = df[n1_week_cols].copy()
         for col in n1_week_cols: df_n1_sales[col] = pd.to_numeric(df_n1_sales[col], errors='coerce').fillna(0)
         month_col_map_n1 = approx_weeks_to_months(n1_week_cols)
-
-        # --- 2. Calculate N-1 Base Sales & Seasonality ONLY for Selected Months ---
-        total_n1_sales_selected_months = pd.Series(0.0, index=df_sim.index)
-        monthly_sales_n1_selected = {}
+        total_n1_sales_selected_months = pd.Series(0.0, index=df_sim.index); monthly_sales_n1_selected = {}
         for month in selected_months:
             if month in month_col_map_n1 and month_col_map_n1[month]:
                 month_n1_cols = [col for col in month_col_map_n1[month] if col in df_n1_sales.columns]
-                if month_n1_cols:
-                    sales_this_month = df_n1_sales[month_n1_cols].sum(axis=1)
-                    monthly_sales_n1_selected[month] = sales_this_month
-                    total_n1_sales_selected_months += sales_this_month
-                    df_sim[f"Ventes N-1 {month}"] = sales_this_month
+                if month_n1_cols: sales_this_month = df_n1_sales[month_n1_cols].sum(axis=1); monthly_sales_n1_selected[month] = sales_this_month; total_n1_sales_selected_months += sales_this_month; df_sim[f"Ventes N-1 {month}"] = sales_this_month
                 else: monthly_sales_n1_selected[month] = pd.Series(0.0, index=df_sim.index); df_sim[f"Ventes N-1 {month}"] = 0.0
             else: logging.warning(f"Aucune colonne N-1 pour mois approx. : {month}"); monthly_sales_n1_selected[month] = pd.Series(0.0, index=df_sim.index); df_sim[f"Ventes N-1 {month}"] = 0.0
         df_sim["Ventes N-1 Total (Mois Sélectionnés)"] = total_n1_sales_selected_months
-
-        # Calculate quantity seasonality *within* the selected N-1 months period
-        period_seasonality = {}
-        safe_total_n1_sales_selected = total_n1_sales_selected_months.replace(0, np.nan) # Avoid 0/0
+        period_seasonality = {}; safe_total_n1_sales_selected = total_n1_sales_selected_months.replace(0, np.nan)
         for month in selected_months:
-            if month in monthly_sales_n1_selected:
-                 period_seasonality[month] = (monthly_sales_n1_selected[month] / safe_total_n1_sales_selected).fillna(0)
+            if month in monthly_sales_n1_selected: period_seasonality[month] = (monthly_sales_n1_selected[month] / safe_total_n1_sales_selected).fillna(0)
             else: period_seasonality[month] = 0.0
-
-        # --- 3. Calculate Base Monthly Forecast Quantity ---
         base_monthly_forecast_qty = {}
-
         if sim_type == 'Simple Progression':
-            prog_factor = 1 + (progression_pct / 100.0)
-            total_forecast_qty_selected_period = total_n1_sales_selected_months * prog_factor
-            # Distribute total forecast qty using period seasonality
-            for month in selected_months:
-                base_monthly_forecast_qty[month] = total_forecast_qty_selected_period * period_seasonality.get(month, 0.0)
-
+            prog_factor = 1 + (progression_pct / 100.0); total_forecast_qty_selected_period = total_n1_sales_selected_months * prog_factor
+            for month in selected_months: base_monthly_forecast_qty[month] = total_forecast_qty_selected_period * period_seasonality.get(month, 0.0)
         elif sim_type == 'Objectif Montant':
             if objectif_montant <= 0: st.error("Objectif montant > 0 requis."); return None
-            logging.info(f"Forecast 'Objectif Montant': Distributing Objective={objectif_montant:.2f} based on N-1 Qty Seasonality for selected months.")
-
-            # Check if there's any N-1 sales seasonality to distribute by
+            logging.info(f"Forecast 'Objectif Montant': Distributing Objective={objectif_montant:.2f} based on N-1 Qty Seasonality.")
             total_n1_sales_check = total_n1_sales_selected_months.sum()
-
             if total_n1_sales_check <= 0:
-                st.warning("Ventes N-1 nulles pour tous les mois sélectionnés. Répartition égale de l'objectif montant tentée (basée sur le prix).")
-                # Fallback: Distribute amount evenly per month, then divide by price
-                num_selected_months = len(selected_months)
-                if num_selected_months == 0: return None # Should not happen
+                st.warning("Ventes N-1 nulles pour mois sélectionnés. Répartition égale tentée.")
+                num_selected_months = len(selected_months);
+                if num_selected_months == 0: return None
                 amount_per_month = objectif_montant / num_selected_months
-                for month in selected_months:
-                     base_monthly_forecast_qty[month] = np.divide(
-                         amount_per_month, df_sim["Tarif d'achat"],
-                         out=np.zeros_like(df_sim["Tarif d'achat"], dtype=float),
-                         where=df_sim["Tarif d'achat"]!=0
-                     )
+                for month in selected_months: base_monthly_forecast_qty[month] = np.divide(amount_per_month, df_sim["Tarif d'achat"], out=np.zeros_like(df_sim["Tarif d'achat"], dtype=float), where=df_sim["Tarif d'achat"]!=0)
             else:
-                # Distribute target amount based on N-1 QTY seasonality, then get qty estimate
                 for month in selected_months:
-                    # Allocate portion of the total objective amount based on this month's N-1 QTY share
                     target_amount_this_month = objectif_montant * period_seasonality.get(month, 0.0)
-                    # Estimate quantity by dividing this month's target amount by current price
-                    base_monthly_forecast_qty[month] = np.divide(
-                        target_amount_this_month, df_sim["Tarif d'achat"],
-                        out=np.zeros_like(df_sim["Tarif d'achat"], dtype=float), # Initialize output with zeros
-                        where=df_sim["Tarif d'achat"]!=0 # Avoid division by zero price
-                    )
-        else:
-             st.error("Type de simulation non reconnu."); return None
-
-        # --- 4 & 5. Adjust by Conditionnement & Calculate Final Amounts ---
+                    base_monthly_forecast_qty[month] = np.divide(target_amount_this_month, df_sim["Tarif d'achat"], out=np.zeros_like(df_sim["Tarif d'achat"], dtype=float), where=df_sim["Tarif d'achat"]!=0)
+        else: st.error("Type simulation non reconnu."); return None
         total_adjusted_qty = pd.Series(0.0, index=df_sim.index); total_final_amount = pd.Series(0.0, index=df_sim.index)
         for month in selected_months:
             month_qty_col = f"Qté Prév. {month}"; month_amt_col = f"Montant Prév. {month} (€)"
             if month in base_monthly_forecast_qty:
-                 base_qty = pd.to_numeric(base_monthly_forecast_qty[month], errors='coerce').fillna(0)
-                 cond = df_sim["Conditionnement"]
-                 # Ensure cond is not zero before dividing
+                 base_qty = pd.to_numeric(base_monthly_forecast_qty[month], errors='coerce').fillna(0); cond = df_sim["Conditionnement"]
                  adjusted_qty = (np.ceil(np.divide(base_qty, cond, out=np.zeros_like(base_qty, dtype=float), where=cond!=0)) * cond).fillna(0).astype(int)
-                 df_sim[month_qty_col] = adjusted_qty
-                 df_sim[month_amt_col] = adjusted_qty * df_sim["Tarif d'achat"]
+                 df_sim[month_qty_col] = adjusted_qty; df_sim[month_amt_col] = adjusted_qty * df_sim["Tarif d'achat"]
                  total_adjusted_qty += adjusted_qty; total_final_amount += df_sim[month_amt_col]
             else: df_sim[month_qty_col] = 0; df_sim[month_amt_col] = 0.0
-
-        df_sim["Qté Totale Prév. (Mois Sélectionnés)"] = total_adjusted_qty
-        df_sim["Montant Total Prév. (€) (Mois Sélectionnés)"] = total_final_amount
-
-        # --- 6. Final Formatting & Return ---
+        df_sim["Qté Totale Prév. (Mois Sélectionnés)"] = total_adjusted_qty; df_sim["Montant Total Prév. (€) (Mois Sélectionnés)"] = total_final_amount
         id_cols = ["Fournisseur", "Référence Article", "Désignation Article", "Conditionnement", "Tarif d'achat"]
         n1_cols = [f"Ventes N-1 {m}" for m in selected_months if f"Ventes N-1 {m}" in df_sim.columns]
         qty_cols = [f"Qté Prév. {m}" for m in selected_months]; amt_cols = [f"Montant Prév. {m} (€)" for m in selected_months]
         total_cols = ["Ventes N-1 Total (Mois Sélectionnés)", "Qté Totale Prév. (Mois Sélectionnés)", "Montant Total Prév. (€) (Mois Sélectionnés)"]
         final_cols = id_cols + total_cols + n1_cols + qty_cols + amt_cols; final_cols = [col for col in final_cols if col in df_sim.columns]
         return df_sim[final_cols]
-
-    except Exception as e:
-        st.error(f"Erreur inattendue pendant la simulation forecast : {e}")
-        logging.exception("Error during forecast simulation calculation:")
-        return None
+    except Exception as e: st.error(f"Erreur simulation forecast : {e}"); logging.exception("Error forecast sim calc:"); return None
 
 def sanitize_sheet_name(name):
     """ Removes invalid characters for Excel sheet names and truncates. """
@@ -471,7 +413,6 @@ if 'df_initial_filtered' in st.session_state and st.session_state.df_initial_fil
                     else: st.info("Aucune donnée à exporter.")
                  else: st.info("Résultats analyse invalidés. Relancez.")
 
-
     # ========================= TAB 3: Vérification Stock =========================
     with tab3:
         # ... (Tab 3 code remains unchanged) ...
@@ -509,7 +450,7 @@ if 'df_initial_filtered' in st.session_state and st.session_state.df_initial_fil
             with col1_f:
                 if sim_t == 'Simple Progression': prog_pct = st.number_input(label="📈 Progression (%)", min_value=-100.0, value=st.session_state.get('forecast_prog_pct', 5.0), step=0.5, format="%.1f", key="fcst_prog_pct")
             with col2_f:
-                if sim_t == 'Objectif Montant': obj_mt = st.number_input(label="🎯 Objectif Montant (€) (pour mois sélectionnés)", min_value=0.0, value=st.session_state.get('forecast_target_amount', 10000.0), step=1000.0, format="%.2f", key="fcst_target_amount") # Clarified label
+                if sim_t == 'Objectif Montant': obj_mt = st.number_input(label="🎯 Objectif Montant (€) (pour mois sélectionnés)", min_value=0.0, value=st.session_state.get('forecast_target_amount', 10000.0), step=1000.0, format="%.2f", key="fcst_target_amount")
 
             if st.button("▶️ Lancer Simulation", key="run_fcst_sim"):
                  if not sel_months_fcst: st.warning("Sélectionnez mois.")
@@ -547,4 +488,4 @@ elif not uploaded_file:
     if st.button("🔄 Réinitialiser l'application"):
          keys_to_clear = list(st.session_state.keys())
          for key in keys_to_clear: del st.session_state[key]
-         st.rerun()
+         st.rerun() # Use st.rerun()
