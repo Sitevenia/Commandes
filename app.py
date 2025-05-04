@@ -123,20 +123,12 @@ def calculer_rotation_stock(df, semaine_columns, periode_semaines):
     except KeyError as e: st.error(f"Erreur clé calc rotation: '{e}'."); return None
     except Exception as e: st.error(f"Erreur inattendue calc rotation: {e}"); logging.exception("Error calc rotation:"); return None
 
-# ==============================================================================
-# --- NEW: Forecast Simulation Calculation Function --- (Copied from previous answer)
-# ==============================================================================
 def approx_weeks_to_months(week_columns_52):
     """Approximates month mapping for 52 consecutive week columns."""
-    month_map = {}
-    weeks_per_month_approx = 52 / 12
+    month_map = {}; weeks_per_month_approx = 52 / 12
     for i in range(1, 13):
-        start_idx = int(round((i-1) * weeks_per_month_approx))
-        end_idx = int(round(i * weeks_per_month_approx))
-        # Ensure indices are within bounds and slice correctly
-        month_cols = week_columns_52[start_idx : min(end_idx, 52)]
-        month_name = calendar.month_name[i]
-        month_map[month_name] = month_cols
+        start_idx = int(round((i-1) * weeks_per_month_approx)); end_idx = int(round(i * weeks_per_month_approx))
+        month_cols = week_columns_52[start_idx : min(end_idx, 52)]; month_name = calendar.month_name[i]; month_map[month_name] = month_cols
     logging.info(f"Approx month map created. Example Jan: {month_map.get('January', [])}")
     return month_map
 
@@ -235,6 +227,12 @@ if 'forecast_result_df' not in st.session_state: st.session_state.forecast_resul
 if 'selected_fournisseurs_session' not in st.session_state: st.session_state.selected_fournisseurs_session = []
 if 'rotation_threshold_value' not in st.session_state: st.session_state.rotation_threshold_value = 1.0 # Default threshold
 if 'show_all_rotation' not in st.session_state: st.session_state.show_all_rotation = True # Default to showing all
+# Initialize state for forecast inputs
+if 'forecast_selected_months' not in st.session_state: st.session_state.forecast_selected_months = list(calendar.month_name)[1:]
+if 'forecast_sim_type_index' not in st.session_state: st.session_state.forecast_sim_type_index = 0
+if 'forecast_prog_pct' not in st.session_state: st.session_state.forecast_prog_pct = 5.0
+if 'forecast_target_amount' not in st.session_state: st.session_state.forecast_target_amount = 10000.0
+
 
 # --- Data Loading and Initial Processing ---
 if uploaded_file and st.session_state.df_full is None:
@@ -341,8 +339,22 @@ if 'df_initial_filtered' in st.session_state and st.session_state.df_initial_fil
         else:
             st.markdown("#### Paramètres de Calcul")
             col1_cmd, col2_cmd = st.columns(2)
-            with col1_cmd: duree_semaines_cmd = st.number_input(label="⏳ Durée couverture (semaines)", min_value=1, max_value=260, value=4, step=1, key="duree_cmd")
-            with col2_cmd: montant_minimum_input_cmd = st.number_input(label="💶 Montant minimum global (€)", min_value=0.0, max_value=1e12, value=0.0, step=50.0, format="%.2f", key="montant_min_cmd")
+            with col1_cmd:
+                # Using keyword arguments for number_input
+                duree_semaines_cmd = st.number_input(
+                    label="⏳ Durée couverture (semaines)",
+                    min_value=1, max_value=260, value=4, step=1,
+                    key="duree_cmd",
+                    help="Nombre de semaines de ventes futures estimées que la commande doit couvrir."
+                )
+            with col2_cmd:
+                # Using keyword arguments for number_input
+                montant_minimum_input_cmd = st.number_input(
+                    label="💶 Montant minimum global (€)",
+                    min_value=0.0, max_value=1e12, value=0.0, step=50.0, format="%.2f",
+                    key="montant_min_cmd",
+                    help="Montant minimum global utilisé pour tenter d'ajuster les quantités à la hausse."
+                )
 
             if st.button("🚀 Calculer les Quantités", key="calculate_button_cmd"):
                 with st.spinner("Calcul en cours..."): result_cmd = calculer_quantite_a_commander(df_display_filtered, semaine_columns, montant_minimum_input_cmd, duree_semaines_cmd)
@@ -419,6 +431,7 @@ if 'df_initial_filtered' in st.session_state and st.session_state.df_initial_fil
                               fname_cmd = f"commande_{'multiples' if len(suppliers_cmd_displayed)>1 else sanitize_sheet_name(suppliers_cmd_displayed[0])}_{pd.Timestamp.now().strftime('%Y%m%d_%H%M')}.xlsx"
                               st.download_button(label=f"📥 Télécharger Commande ({sheets_created_cmd} Onglet{'s' if sheets_created_cmd>1 else ''})", data=output_cmd, file_name=fname_cmd, mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key="download_cmd_btn")
                          else: st.info("Aucune quantité > 0 à exporter pour la commande calculée.")
+
                     else: st.info("Aucune quantité > 0 trouvée dans les résultats à exporter.")
                 else:
                     st.info("Les résultats affichés précédemment ne correspondent pas à la sélection actuelle de fournisseurs. Veuillez relancer le calcul si nécessaire.")
@@ -497,17 +510,17 @@ if 'df_initial_filtered' in st.session_state and st.session_state.df_initial_fil
 
                     # Export Rotation Data (Exports the DISPLAYED data)
                     st.markdown("#### Exportation de l'Analyse Affichée")
-                    if not df_results_rot_to_display.empty: # Export based on DISPLAYED results
+                    if not df_results_rot_to_display.empty:
                          output_rot = io.BytesIO()
                          export_rot_cols_base = ["AF_RefFourniss", "Référence Article", "Désignation Article", "Tarif d'achat", "Stock", "Unités Vendues (Période)", "Ventes Moy Hebdo (Période)", "Ventes Moy Mensuel (Période)", "Semaines Stock (WoS)", "Rotation Unités (Proxy)", "Valeur Stock Actuel (€)", "COGS (Période)", "Rotation Valeur (Proxy)"]
                          export_rot_cols_with_fourn = ["Fournisseur"] + export_rot_cols_base if "Fournisseur" in df_results_rot_to_display.columns else export_rot_cols_base
                          export_rot_cols_final = [col for col in export_rot_cols_with_fourn if col in df_results_rot_to_display.columns]
-                         df_export_rot = df_results_rot_to_display[export_rot_cols_final].copy() # Use displayed DF
-                         for col, decimals in numeric_cols_to_round.items(): # Reuse rounding dict
+                         df_export_rot = df_results_rot_to_display[export_rot_cols_final].copy()
+                         for col, decimals in numeric_cols_to_round.items():
                               if col in df_export_rot.columns:
                                   df_export_rot[col] = pd.to_numeric(df_export_rot[col], errors='coerce')
                                   if pd.api.types.is_numeric_dtype(df_export_rot[col]): df_export_rot[col] = df_export_rot[col].round(decimals)
-                         df_export_rot.replace([np.inf, -np.inf], 'Infini', inplace=True) # Replace inf AFTER rounding
+                         df_export_rot.replace([np.inf, -np.inf], 'Infini', inplace=True)
                          export_label = f"Filtree_{threshold_display:.1f}" if not show_all_flag else "Complete"
                          sheet_name_rot = f"Rotation_{export_label}"
                          fname_rot_base = f"analyse_rotation_{export_label}"
@@ -519,7 +532,7 @@ if 'df_initial_filtered' in st.session_state and st.session_state.df_initial_fil
                          st.download_button(label=download_label_rot, data=output_rot, file_name=fname_rot, mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key="download_rot_btn")
                     elif not df_results_rot_orig.empty: st.info(f"Aucune donnée de rotation correspondant aux critères actuels à exporter.")
                     else: st.info("Aucune donnée de rotation calculée à exporter.")
-                 else: # Results in session state don't match current selection
+                 else:
                      st.info("Les résultats d'analyse affichés précédemment ne correspondent pas à la sélection actuelle de fournisseurs. Veuillez relancer l'analyse si nécessaire.")
 
 
@@ -530,7 +543,7 @@ if 'df_initial_filtered' in st.session_state and st.session_state.df_initial_fil
 
         df_source_for_neg_stock = st.session_state.get('df_full', None)
 
-        if df_source_for_neg_stock is None: st.warning("Données non chargées.")
+        if df_source_for_neg_stock is None: st.warning("Les données n'ont pas été chargées.")
         elif df_source_for_neg_stock.empty: st.warning("Aucune donnée dans 'Tableau final'.")
         else:
             stock_col = "Stock"
@@ -559,7 +572,6 @@ if 'df_initial_filtered' in st.session_state and st.session_state.df_initial_fil
         st.caption("Utilise les fournisseurs sélectionnés dans la barre latérale et suppose que les 52 dernières colonnes de ventes représentent l'année N-1.")
         st.warning("🚨 **Approximation Importante:** Le calcul de saisonnalité mensuelle est basé sur un découpage approximatif des 52 dernières colonnes hebdomadaires. Pour une précision accrue, un fichier avec des dates explicites serait nécessaire.")
 
-        # Check conditions for forecast simulation
         if df_display_filtered.empty:
              if selected_fournisseurs: st.warning("Aucun article trouvé pour le(s) fournisseur(s) sélectionné(s).")
              else: st.info("Veuillez sélectionner au moins un fournisseur.")
@@ -568,45 +580,40 @@ if 'df_initial_filtered' in st.session_state and st.session_state.df_initial_fil
         else:
             st.markdown("#### Paramètres de Simulation")
 
-            # Select Months
             all_months = list(calendar.month_name)[1:]
-            # Use session state to remember selected months or default to all
             default_months = st.session_state.get('forecast_selected_months', all_months)
-            selected_months_forecast = st.multiselect(
-                "📅 Mois à inclure dans la simulation:",
-                options=all_months, default=default_months, key="forecast_months_select"
-            )
-            st.session_state.forecast_selected_months = selected_months_forecast # Store selection
+            selected_months_forecast = st.multiselect("📅 Mois à inclure dans la simulation:", options=all_months, default=default_months, key="forecast_months_select")
+            st.session_state.forecast_selected_months = selected_months_forecast
 
-            # Simulation Type
-            sim_type = st.radio(
-                "⚙️ Type de Simulation:", ('Simple Progression', 'Objectif Montant'),
-                key="forecast_sim_type", horizontal=True,
-                index=0 if st.session_state.get('forecast_sim_type_index', 0) == 0 else 1 # Persist radio choice
-            )
+            sim_type = st.radio("⚙️ Type de Simulation:", ('Simple Progression', 'Objectif Montant'), key="forecast_sim_type", horizontal=True, index=st.session_state.get('forecast_sim_type_index', 0))
             st.session_state.forecast_sim_type_index = 0 if sim_type == 'Simple Progression' else 1
 
-            # Conditional Inputs
             progression_pct = 0.0; objectif_montant = 0.0
             col1_fcst, col2_fcst = st.columns(2)
             with col1_fcst:
                 if sim_type == 'Simple Progression':
-                    progression_pct = st.number_input( "📈 Progression vs N-1 (%)", -100.0, value=st.session_state.get('forecast_prog_pct', 5.0), step=0.5, format="%.1f", key="forecast_prog_pct")
-                    st.session_state.forecast_prog_pct = progression_pct
+                    # Only read from widget, don't assign back to session state here
+                    progression_pct = st.number_input(label="📈 Progression vs N-1 (%)", min_value=-100.0, value=st.session_state.get('forecast_prog_pct', 5.0), step=0.5, format="%.1f", key="forecast_prog_pct")
             with col2_fcst:
                 if sim_type == 'Objectif Montant':
-                    objectif_montant = st.number_input( "🎯 Objectif Montant Total (€)", min_value=0.0, value=st.session_state.get('forecast_target_amount', 10000.0), step=1000.0, format="%.2f", key="forecast_target_amount")
-                    st.session_state.forecast_target_amount = objectif_montant
+                    # Only read from widget, don't assign back to session state here
+                    objectif_montant = st.number_input(label="🎯 Objectif Montant Total (€)", min_value=0.0, value=st.session_state.get('forecast_target_amount', 10000.0), step=1000.0, format="%.2f", key="forecast_target_amount")
 
-            # Simulation Button
             if st.button("▶️ Lancer la Simulation Forecast", key="run_forecast_sim"):
                  if not selected_months_forecast: st.warning("Veuillez sélectionner au moins un mois.")
                  else:
+                    # Read current values from session state (updated by widgets on interaction)
+                    current_prog_pct = st.session_state.get('forecast_prog_pct', 5.0)
+                    current_obj_amt = st.session_state.get('forecast_target_amount', 10000.0)
+                    # Use the correct variable based on sim_type
+                    prog_to_use = current_prog_pct if sim_type == 'Simple Progression' else 0
+                    obj_to_use = current_obj_amt if sim_type == 'Objectif Montant' else 0
+
                     with st.spinner("Simulation en cours..."):
-                         df_forecast_result = calculer_forecast_simulation(df_display_filtered, semaine_columns, selected_months_forecast, sim_type, progression_pct, objectif_montant)
+                         df_forecast_result = calculer_forecast_simulation(df_display_filtered, semaine_columns, selected_months_forecast, sim_type, prog_to_use, obj_to_use)
                     if df_forecast_result is not None:
                         st.success("✅ Simulation terminée."); st.session_state.forecast_result_df = df_forecast_result
-                        st.session_state.forecast_params = {'suppliers': selected_fournisseurs, 'months': selected_months_forecast, 'type': sim_type, 'prog': progression_pct, 'obj': objectif_montant}
+                        st.session_state.forecast_params = {'suppliers': selected_fournisseurs, 'months': selected_months_forecast, 'type': sim_type, 'prog': prog_to_use, 'obj': obj_to_use}
                         st.rerun()
                     else:
                         st.error("❌ La simulation Forecast a échoué.")
@@ -614,8 +621,8 @@ if 'df_initial_filtered' in st.session_state and st.session_state.df_initial_fil
 
             # Display Forecast Results
             if 'forecast_result_df' in st.session_state and st.session_state.forecast_result_df is not None:
-                 current_params = {'suppliers': selected_fournisseurs, 'months': selected_months_forecast, 'type': sim_type, 'prog': progression_pct, 'obj': objectif_montant}
-                 if st.session_state.get('forecast_params') == current_params:
+                 current_params_display = {'suppliers': selected_fournisseurs, 'months': selected_months_forecast, 'type': sim_type, 'prog': st.session_state.get('forecast_prog_pct', 5.0) if sim_type=='Simple Progression' else 0, 'obj': st.session_state.get('forecast_target_amount', 10000.0) if sim_type=='Objectif Montant' else 0}
+                 if st.session_state.get('forecast_params') == current_params_display:
                     st.markdown("---"); st.markdown("#### Résultats de la Simulation Forecast")
                     df_results_fcst_display = st.session_state.forecast_result_df
 
