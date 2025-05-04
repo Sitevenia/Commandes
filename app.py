@@ -307,15 +307,18 @@ if 'df_initial_filtered' in st.session_state and st.session_state.df_initial_fil
     # ========================= TAB 1: Prévision Commande =========================
     with tab1:
         st.header("Prévision Quantités à Commander"); st.caption("Utilise fournisseurs sélectionnés.")
+        # CORRECTED Condition block
         if df_display_filtered.empty:
-             if selected_fournisseurs: st.warning("Aucun article."); else: st.info("Sélectionnez fournisseur(s).")
-        elif not semaine_columns: st.warning("Colonnes ventes manquantes.")
+             if selected_fournisseurs:
+                 st.warning("Aucun article trouvé pour le(s) fournisseur(s) sélectionné(s).")
+             else:
+                 st.info("Veuillez sélectionner au moins un fournisseur dans la barre latérale.")
+        elif not semaine_columns:
+            st.warning("Impossible de calculer: Aucune colonne de ventes valide identifiée.")
         else:
             st.markdown("#### Paramètres"); col1_cmd, col2_cmd = st.columns(2)
-            # CORRECTED: Use Keyword arguments
             with col1_cmd: duree_semaines_cmd = st.number_input(label="⏳ Durée couverture (sem.)", min_value=1, max_value=260, value=4, step=1, key="duree_cmd")
             with col2_cmd: montant_minimum_input_cmd = st.number_input(label="💶 Montant min global (€)", min_value=0.0, max_value=1e12, value=0.0, step=50.0, format="%.2f", key="montant_min_cmd")
-
             if st.button("🚀 Calculer Quantités", key="calc_cmd_btn"):
                 with st.spinner("Calcul..."): result_cmd = calculer_quantite_a_commander(df_display_filtered, semaine_columns, montant_minimum_input_cmd, duree_semaines_cmd)
                 if result_cmd:
@@ -450,9 +453,13 @@ if 'df_initial_filtered' in st.session_state and st.session_state.df_initial_fil
             sim_t = st.radio("⚙️ Type Simulation:", ('Simple Progression', 'Objectif Montant'), key="fcst_sim_type", horizontal=True, index=st.session_state.get('forecast_sim_type_index', 0)); st.session_state.forecast_sim_type_index = 0 if sim_t == 'Simple Progression' else 1
             prog_pct = 0.0; obj_mt = 0.0; col1_f, col2_f = st.columns(2)
             with col1_f:
-                if sim_t == 'Simple Progression': prog_pct = st.number_input(label="📈 Progression (%)", min_value=-100.0, value=st.session_state.get('forecast_prog_pct', 5.0), step=0.5, format="%.1f", key="fcst_prog_pct")
+                if sim_t == 'Simple Progression':
+                    # Use key to manage state, removed explicit assignment
+                    prog_pct = st.number_input(label="📈 Progression (%)", min_value=-100.0, value=st.session_state.get('forecast_prog_pct', 5.0), step=0.5, format="%.1f", key="fcst_prog_pct")
             with col2_f:
-                if sim_t == 'Objectif Montant': obj_mt = st.number_input(label="🎯 Objectif Montant (€) (pour mois sélectionnés)", min_value=0.0, value=st.session_state.get('forecast_target_amount', 10000.0), step=1000.0, format="%.2f", key="fcst_target_amount")
+                if sim_t == 'Objectif Montant':
+                    # Use key to manage state, removed explicit assignment
+                    obj_mt = st.number_input(label="🎯 Objectif Montant (€) (pour mois sélectionnés)", min_value=0.0, value=st.session_state.get('forecast_target_amount', 10000.0), step=1000.0, format="%.2f", key="fcst_target_amount")
 
             if st.button("▶️ Lancer Simulation", key="run_fcst_sim"):
                  if not sel_months_fcst: st.warning("Sélectionnez mois.")
@@ -462,13 +469,12 @@ if 'df_initial_filtered' in st.session_state and st.session_state.df_initial_fil
                     if df_fcst_res is not None: st.success("✅ Simulation terminée."); st.session_state.forecast_result_df = df_fcst_res; st.session_state.forecast_params = {'suppliers': selected_fournisseurs, 'months': sel_months_fcst, 'type': sim_t, 'prog': prog_use, 'obj': obj_use}; st.rerun()
                     else: st.error("❌ Simulation échouée.");
             if 'forecast_result_df' in st.session_state and st.session_state.forecast_result_df is not None:
-                 curr_params_disp = {'suppliers': selected_fournisseurs, 'months': sel_months_fcst, 'type': sim_t, 'prog': st.session_state.get('forecast_prog_pct', 5.0) if sim_t=='Simple Progression' else 0, 'obj': st.session_state.get('forecast_target_amount', 10000.0) if sim_t=='Objectif Montant' else 0}
+                 current_params_disp = {'suppliers': selected_fournisseurs, 'months': sel_months_fcst, 'type': sim_t, 'prog': st.session_state.get('forecast_prog_pct', 5.0) if sim_t=='Simple Progression' else 0, 'obj': st.session_state.get('forecast_target_amount', 10000.0) if sim_t=='Objectif Montant' else 0}
                  if st.session_state.get('forecast_params') == curr_params_disp:
                     st.markdown("---"); st.markdown("#### Résultats Simulation")
                     df_fcst_disp = st.session_state.forecast_result_df;
-                    # --- DEBUG: Check columns before formatting ---
+                    # Debug check for columns
                     # st.write("Forecast DataFrame Columns:", df_fcst_disp.columns.tolist())
-                    # --- END DEBUG ---
                     mq_cols = [f"Qté Prév. {m}" for m in sel_months_fcst if f"Qté Prév. {m}" in df_fcst_disp.columns]; ma_cols = [f"Montant Prév. {m} (€)" for m in sel_months_fcst if f"Montant Prév. {m} (€)" in df_fcst_disp.columns]; n1m_cols = [f"Ventes N-1 {m}" for m in sel_months_fcst if f"Ventes N-1 {m}" in df_fcst_disp.columns]
                     fcst_id = ["Fournisseur", "Référence Article", "Désignation Article", "Conditionnement", "Tarif d'achat"]; fcst_tot = ["Ventes N-1 Total (Mois Sélectionnés)", "Qté Totale Prév. (Mois Sélectionnés)", "Montant Total Prév. (€) (Mois Sélectionnés)"]
                     fcst_disp_cols = fcst_id + fcst_tot + n1m_cols + mq_cols + ma_cols; fcst_disp_fin = [c for c in fcst_disp_cols if c in df_fcst_disp.columns]
@@ -479,10 +485,12 @@ if 'df_initial_filtered' in st.session_state and st.session_state.df_initial_fil
                         for c in n1m_cols: fcst_fmters[c] = "{:,.0f}";
                         for c in mq_cols: fcst_fmters[c] = "{:,.0f}";
                         for c in ma_cols: fcst_fmters[c] = "{:,.2f}€"
-                        # Filter formatters to only include columns present in fcst_disp_fin
-                        fcst_fmters_final = {k: v for k, v in fcst_fmters.items() if k in fcst_disp_fin}
-                        # st.write("Formatters Applied:", fcst_fmters_final) # Debug formatters
-                        st.dataframe(df_fcst_disp[fcst_disp_fin].style.format(fcst_fmters_final, na_rep="-", thousands=","))
+                        fcst_fmters_final = {k: v for k, v in fcst_fmters.items() if k in fcst_disp_fin} # Filter formatters
+                        try:
+                            st.dataframe(df_fcst_disp[fcst_disp_fin].style.format(fcst_fmters_final, na_rep="-", thousands=","))
+                        except Exception as e_fmt:
+                            st.error(f"Erreur de formatage de l'affichage: {e_fmt}")
+                            st.dataframe(df_fcst_disp[fcst_disp_fin]) # Display without formatting on error
                         st.markdown("#### Export Simulation"); out_f = io.BytesIO(); df_exp_f = df_fcst_disp[fcst_disp_fin].copy()
                         try:
                             with pd.ExcelWriter(out_f, engine="openpyxl") as w_f: df_exp_f.to_excel(w_f, sheet_name=f"Forecast_{sim_t.replace(' ','_')}", index=False)
@@ -498,4 +506,4 @@ elif not uploaded_file:
     if st.button("🔄 Réinitialiser l'application"):
          keys_to_clear = list(st.session_state.keys())
          for key in keys_to_clear: del st.session_state[key]
-         st.rerun() # Use st.rerun()
+         st.rerun()
