@@ -199,6 +199,7 @@ def calculer_forecast_simulation(df, all_semaine_columns, selected_months, sim_t
         return df_sim[final_cols]
     except Exception as e: st.error(f"Erreur simulation forecast : {e}"); logging.exception("Error forecast sim calc:"); return None
 
+
 def sanitize_sheet_name(name):
     """ Removes invalid characters for Excel sheet names and truncates. """
     if not isinstance(name, str): name = str(name)
@@ -303,17 +304,18 @@ if 'df_initial_filtered' in st.session_state and st.session_state.df_initial_fil
     # --- Tabs ---
     tab1, tab2, tab3, tab4 = st.tabs(["Prévision Commande", "Analyse Rotation Stock", "Vérification Stock", "Simulation Forecast"])
 
-    # ================= TAB 1: Prévision Commande =================
+    # ========================= TAB 1: Prévision Commande =========================
     with tab1:
-        # ... (Tab 1 code remains unchanged) ...
         st.header("Prévision Quantités à Commander"); st.caption("Utilise fournisseurs sélectionnés.")
         if df_display_filtered.empty:
              if selected_fournisseurs: st.warning("Aucun article."); else: st.info("Sélectionnez fournisseur(s).")
         elif not semaine_columns: st.warning("Colonnes ventes manquantes.")
         else:
             st.markdown("#### Paramètres"); col1_cmd, col2_cmd = st.columns(2)
+            # CORRECTED: Use Keyword arguments
             with col1_cmd: duree_semaines_cmd = st.number_input(label="⏳ Durée couverture (sem.)", min_value=1, max_value=260, value=4, step=1, key="duree_cmd")
             with col2_cmd: montant_minimum_input_cmd = st.number_input(label="💶 Montant min global (€)", min_value=0.0, max_value=1e12, value=0.0, step=50.0, format="%.2f", key="montant_min_cmd")
+
             if st.button("🚀 Calculer Quantités", key="calc_cmd_btn"):
                 with st.spinner("Calcul..."): result_cmd = calculer_quantite_a_commander(df_display_filtered, semaine_columns, montant_minimum_input_cmd, duree_semaines_cmd)
                 if result_cmd:
@@ -464,6 +466,9 @@ if 'df_initial_filtered' in st.session_state and st.session_state.df_initial_fil
                  if st.session_state.get('forecast_params') == curr_params_disp:
                     st.markdown("---"); st.markdown("#### Résultats Simulation")
                     df_fcst_disp = st.session_state.forecast_result_df;
+                    # --- DEBUG: Check columns before formatting ---
+                    # st.write("Forecast DataFrame Columns:", df_fcst_disp.columns.tolist())
+                    # --- END DEBUG ---
                     mq_cols = [f"Qté Prév. {m}" for m in sel_months_fcst if f"Qté Prév. {m}" in df_fcst_disp.columns]; ma_cols = [f"Montant Prév. {m} (€)" for m in sel_months_fcst if f"Montant Prév. {m} (€)" in df_fcst_disp.columns]; n1m_cols = [f"Ventes N-1 {m}" for m in sel_months_fcst if f"Ventes N-1 {m}" in df_fcst_disp.columns]
                     fcst_id = ["Fournisseur", "Référence Article", "Désignation Article", "Conditionnement", "Tarif d'achat"]; fcst_tot = ["Ventes N-1 Total (Mois Sélectionnés)", "Qté Totale Prév. (Mois Sélectionnés)", "Montant Total Prév. (€) (Mois Sélectionnés)"]
                     fcst_disp_cols = fcst_id + fcst_tot + n1m_cols + mq_cols + ma_cols; fcst_disp_fin = [c for c in fcst_disp_cols if c in df_fcst_disp.columns]
@@ -471,8 +476,13 @@ if 'df_initial_filtered' in st.session_state and st.session_state.df_initial_fil
                     elif not fcst_disp_fin: st.error("Erreur: Colonnes résultats manquantes.")
                     else:
                         fcst_fmters = {"Tarif d'achat": "{:,.2f}€", "Conditionnement": "{:,.0f}", "Ventes N-1 Total (Mois Sélectionnés)": "{:,.0f}", "Qté Totale Prév. (Mois Sélectionnés)": "{:,.0f}", "Montant Total Prév. (€) (Mois Sélectionnés)": "{:,.2f}€"}
-                        for c in n1m_cols: fcst_fmters[c] = "{:,.0f}"; for c in mq_cols: fcst_fmters[c] = "{:,.0f}"; for c in ma_cols: fcst_fmters[c] = "{:,.2f}€"
-                        st.dataframe(df_fcst_disp[fcst_disp_fin].style.format(fcst_fmters, na_rep="-", thousands=","))
+                        for c in n1m_cols: fcst_fmters[c] = "{:,.0f}";
+                        for c in mq_cols: fcst_fmters[c] = "{:,.0f}";
+                        for c in ma_cols: fcst_fmters[c] = "{:,.2f}€"
+                        # Filter formatters to only include columns present in fcst_disp_fin
+                        fcst_fmters_final = {k: v for k, v in fcst_fmters.items() if k in fcst_disp_fin}
+                        # st.write("Formatters Applied:", fcst_fmters_final) # Debug formatters
+                        st.dataframe(df_fcst_disp[fcst_disp_fin].style.format(fcst_fmters_final, na_rep="-", thousands=","))
                         st.markdown("#### Export Simulation"); out_f = io.BytesIO(); df_exp_f = df_fcst_disp[fcst_disp_fin].copy()
                         try:
                             with pd.ExcelWriter(out_f, engine="openpyxl") as w_f: df_exp_f.to_excel(w_f, sheet_name=f"Forecast_{sim_t.replace(' ','_')}", index=False)
