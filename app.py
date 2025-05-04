@@ -167,7 +167,7 @@ if uploaded_file and st.session_state.df_full is None:
         min_order_dict_temp = {}
         if df_min_commande_temp is not None:
             st.success("✅ Onglet 'Minimum de commande' lu.")
-            supplier_col_min = "Fournisseur"; min_amount_col = "Minimum Commande €"
+            supplier_col_min = "Fournisseur"; min_amount_col = "Minimum de Commande"
             required_min_cols = [supplier_col_min, min_amount_col]
             if all(col in df_min_commande_temp.columns for col in required_min_cols):
                 try:
@@ -213,7 +213,35 @@ if 'df_initial_filtered' in st.session_state and st.session_state.df_initial_fil
     fournisseurs_list = sorted(df_base_filtered["Fournisseur"].unique().tolist()) if not df_base_filtered.empty else []
     min_order_dict = st.session_state.min_order_dict
     semaine_columns = st.session_state.semaine_columns
+# --- Main App UI (Tabs) ---
+if 'df_initial_filtered' in st.session_state and st.session_state.df_initial_filtered is not None:
 
+    df_base_filtered = st.session_state.df_initial_filtered
+    st.sidebar.subheader("Debug Info") # Temporary Debug Section
+    st.sidebar.write("Shape of df_initial_filtered:", df_base_filtered.shape)
+    if "Fournisseur" in df_base_filtered.columns:
+        st.sidebar.write("Unique Fournisseurs in df_initial_filtered:", df_base_filtered["Fournisseur"].unique())
+        fournisseurs_list = sorted(df_base_filtered["Fournisseur"].unique().tolist()) if not df_base_filtered.empty else []
+        st.sidebar.write("Generated fournisseurs_list:", fournisseurs_list) # See the final list
+    else:
+        st.sidebar.error("'Fournisseur' column not found in df_initial_filtered!")
+        fournisseurs_list = [] # Ensure it's empty if column missing
+
+    min_order_dict = st.session_state.min_order_dict
+    semaine_columns = st.session_state.semaine_columns
+
+    st.sidebar.header("Filtres Communs")
+    selected_fournisseurs = st.sidebar.multiselect(
+        "👤 Fournisseur(s)",
+        options=fournisseurs_list, # This is the crucial part
+        default=st.session_state.get('selected_fournisseurs_session', []),
+        key="supplier_select_sidebar",
+        # Add disabled argument for explicit control based on the list:
+        disabled=not bool(fournisseurs_list) # Disable if list is empty
+    )
+    st.session_state.selected_fournisseurs_session = selected_fournisseurs
+
+    # ... rest of the code ...
     st.sidebar.header("Filtres Communs")
     selected_fournisseurs = st.sidebar.multiselect(
         "👤 Fournisseur(s)", options=fournisseurs_list,
