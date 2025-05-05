@@ -183,21 +183,12 @@ def calculer_forecast_simulation(df, all_semaine_columns, selected_months, sim_t
         id_cols = ["Fournisseur", "Référence Article", "Désignation Article", "Conditionnement", "Tarif d'achat"]; n1_cols = [f"Ventes N-1 {m}" for m in selected_months if f"Ventes N-1 {m}" in df_sim.columns]
         qty_cols = [f"Qté Prév. {m}" for m in selected_months]; amt_cols = [f"Montant Prév. {m} (€)" for m in selected_months]; total_cols = ["Ventes N-1 Total (Mois Sélectionnés)", "Qté Totale Prév. (Mois Sel.)", "Montant Total Prév. (€) (Mois Sel.)"]
         final_cols = id_cols + total_cols + n1_cols + qty_cols + amt_cols; final_cols = [c for c in final_cols if c in df_sim.columns]
-        # Rename columns for clarity before returning
-        df_sim.rename(columns={
-            "Ventes N-1 Total (Mois Sélectionnés)": "Vts N-1 Tot (Mois Sel.)",
-            "Qté Totale Prév. (Mois Sélectionnés)": "Qté Tot Prév (Mois Sel.)",
-            "Montant Total Prév. (€) (Mois Sélectionnés)": "Mnt Tot Prév (€) (Mois Sel.)"
-            }, inplace=True)
-        final_cols = [ # Rebuild final_cols with new names
-            "Fournisseur", "Référence Article", "Désignation Article", "Conditionnement", "Tarif d'achat",
-            "Vts N-1 Tot (Mois Sel.)", "Qté Tot Prév (Mois Sel.)", "Mnt Tot Prév (€) (Mois Sel.)"
-            ] + [f"Ventes N-1 {m}" for m in selected_months if f"Ventes N-1 {m}" in df_sim.columns] \
-            + [f"Qté Prév. {m}" for m in selected_months] \
-            + [f"Montant Prév. {m} (€)" for m in selected_months]
-        final_cols = [c for c in final_cols if c in df_sim.columns] # Ensure columns exist after rename
+        df_sim.rename(columns={"Ventes N-1 Total (Mois Sélectionnés)": "Vts N-1 Tot (Mois Sel.)", "Qté Totale Prév. (Mois Sel.)": "Qté Tot Prév (Mois Sel.)", "Montant Total Prév. (€) (Mois Sel.)": "Mnt Tot Prév (€) (Mois Sel.)"}, inplace=True)
+        final_cols = ["Fournisseur", "Référence Article", "Désignation Article", "Conditionnement", "Tarif d'achat", "Vts N-1 Tot (Mois Sel.)", "Qté Tot Prév (Mois Sel.)", "Mnt Tot Prév (€) (Mois Sel.)"] + [f"Ventes N-1 {m}" for m in selected_months if f"Ventes N-1 {m}" in df_sim.columns] + [f"Qté Prév. {m}" for m in selected_months] + [f"Montant Prév. {m} (€)" for m in selected_months]
+        final_cols = [c for c in final_cols if c in df_sim.columns]
         return df_sim[final_cols]
     except Exception as e: st.error(f"Erreur simulation forecast : {e}"); logging.exception("Error forecast sim calc:"); return None
+
 
 def sanitize_sheet_name(name):
     """ Removes invalid characters for Excel sheet names and truncates. """
@@ -222,8 +213,11 @@ default_values = {
     'rotation_threshold_value': 1.0, 'show_all_rotation': True,
     'forecast_selected_months': list(calendar.month_name)[1:],
     'forecast_sim_type_index': 0, 'forecast_prog_pct': 5.0,
-    'forecast_target_amount': 10000.0, 'manual_supplier_selection': [], # For select all
-    'select_all_suppliers': False # For select all
+    'forecast_target_amount': 10000.0,
+    'manual_supplier_selection': [], # For select all
+    'select_all_suppliers_cb': False, # For select all checkbox state
+    'sel_fourn_calc_cmd': [], # Store selection used for last cmd calc
+    'sel_fourn_calc_rot': []  # Store selection used for last rot calc
 }
 for key, default_value in default_values.items():
     if key not in st.session_state:
@@ -231,7 +225,6 @@ for key, default_value in default_values.items():
 
 # --- Data Loading and Initial Processing ---
 if uploaded_file and st.session_state.df_full is None:
-    # ... (Keep the data loading logic from previous versions) ...
     logging.info(f"New file uploaded: {uploaded_file.name}. Processing...")
     keys_to_clear_on_new_file = ['df_initial_filtered', 'semaine_columns', 'calculation_result_df', 'rotation_result_df', 'forecast_result_df']
     for key in keys_to_clear_on_new_file:
@@ -264,15 +257,15 @@ if uploaded_file and st.session_state.df_full is None:
             filter_cols = ["Fournisseur", "AF_RefFourniss"];
             if not all(col in df.columns for col in filter_cols): st.error(f"❌ Colonnes filtrage ({', '.join(filter_cols)}) manquantes."); st.stop()
             df_init_filtered = df[(df["Fournisseur"].notna()) & (df["Fournisseur"] != "") & (df["Fournisseur"] != "#FILTER") & (df["AF_RefFourniss"].notna()) & (df["AF_RefFourniss"] != "")].copy()
-            st.session_state.df_initial_filtered = df_init_filtered # Store base filtered data
+            st.session_state.df_initial_filtered = df_init_filtered
             start_col_index = 12; semaine_cols_temp = []
             if len(df.columns) > start_col_index:
                 potential_week_cols = df.columns[start_col_index:].tolist(); exclude_cols = ["Tarif d'achat", "Conditionnement", "Stock", "Total", "Stock à terme", "Ventes N-1", "Ventes 12 semaines identiques N-1", "Ventes 12 dernières semaines", "Quantité à commander", "Fournisseur", "AF_RefFourniss", "Référence Article", "Désignation Article"]
                 semaine_cols_temp = [col for col in potential_week_cols if col not in exclude_cols and pd.api.types.is_numeric_dtype(df.get(col, pd.Series(dtype=float)).dtype)]
-            st.session_state.semaine_columns = semaine_cols_temp # Store identified week columns
+            st.session_state.semaine_columns = semaine_cols_temp
             if not semaine_cols_temp: logging.warning("No week columns identified.")
             essential_numeric_cols = ["Stock", "Conditionnement", "Tarif d'achat"]; missing_essential = False
-            for col in essential_numeric_cols: # Ensure numeric in the base filtered data
+            for col in essential_numeric_cols:
                  if col in df_init_filtered.columns: df_init_filtered[col] = pd.to_numeric(df_init_filtered[col], errors='coerce').fillna(0)
                  elif not df_init_filtered.empty: st.error(f"Colonne essentielle '{col}' manquante."); missing_essential = True
             if missing_essential: st.stop()
@@ -280,7 +273,6 @@ if uploaded_file and st.session_state.df_full is None:
         except KeyError as e_filter: st.error(f"❌ Colonne filtrage '{e_filter}' manquante."); st.stop()
         except Exception as e_filter_other: st.error(f"❌ Erreur filtrage initial : {e_filter_other}"); st.stop()
     except Exception as e_load: st.error(f"❌ Erreur lecture fichier : {e_load}"); logging.exception("File loading error:"); st.stop()
-
 
 # --- Main App UI ---
 if 'df_initial_filtered' in st.session_state and st.session_state.df_initial_filtered is not None:
@@ -291,63 +283,53 @@ if 'df_initial_filtered' in st.session_state and st.session_state.df_initial_fil
     min_order_dict = st.session_state.min_order_dict
     semaine_columns = st.session_state.semaine_columns
 
-    # --- Sidebar ---
     st.sidebar.header("Filtres (pour Prévision & Rotation)")
 
     # --- Supplier Selection Callbacks ---
     def handle_select_all():
-        if st.session_state.select_all_suppliers:
-            st.session_state.selected_fournisseurs_session = fournisseurs_list
-            # Also update the multiselect widget state if needed, though default should handle it
-            st.session_state.supplier_select_sidebar = fournisseurs_list
+        is_checked = st.session_state.select_all_suppliers_cb # Get the new state of the checkbox
+        if is_checked:
+            st.session_state.selected_fournisseurs_session = fournisseurs_list # Select all
         else:
-            # Revert to the stored manual selection
-            st.session_state.selected_fournisseurs_session = st.session_state.manual_supplier_selection
-            st.session_state.supplier_select_sidebar = st.session_state.manual_supplier_selection
+            st.session_state.selected_fournisseurs_session = st.session_state.manual_supplier_selection # Revert to manual
 
     def handle_manual_select():
-        # Only update manual selection if "Select All" is OFF
-        if not st.session_state.select_all_suppliers:
-            st.session_state.selected_fournisseurs_session = st.session_state.supplier_select_sidebar
-            st.session_state.manual_supplier_selection = st.session_state.supplier_select_sidebar
-        # If "Select All" is ON, changing multiselect should implicitly uncheck "Select All"
-        # However, the on_change for checkbox should handle reverting.
-        # We might need to force uncheck here if interaction feels weird.
-        # Let's test this behavior first. A simpler approach might be needed if state becomes inconsistent.
+        # This runs *after* multiselect value changes via user interaction
+        current_manual_selection = st.session_state.supplier_select_sidebar
+        # Update the effective selection to match the multiselect
+        st.session_state.selected_fournisseurs_session = current_manual_selection
+        # Store this as the new manual selection
+        st.session_state.manual_supplier_selection = current_manual_selection
+        # If the user manually changed the multiselect, uncheck "Select All"
+        st.session_state.select_all_suppliers_cb = False
 
 
     # --- Supplier Selection Widgets ---
-    select_all = st.sidebar.checkbox(
+    st.sidebar.checkbox(
         "Tous les fournisseurs",
-        key="select_all_suppliers",
+        key="select_all_suppliers_cb", # Key for checkbox value
         on_change=handle_select_all,
         disabled=not bool(fournisseurs_list)
     )
 
-    selected_fournisseurs = st.sidebar.multiselect(
+    selected_fournisseurs_widget_value = st.sidebar.multiselect( # Widget renders based on session state
         "👤 Fournisseur(s)",
         options=fournisseurs_list,
-        default=st.session_state.selected_fournisseurs_session, # Reflects current state
-        key="supplier_select_sidebar",
-        on_change=handle_manual_select, # Update manual selection IF select_all is off
+        default=st.session_state.selected_fournisseurs_session, # Reflects current effective state
+        key="supplier_select_sidebar", # Key for multiselect value
+        on_change=handle_manual_select,
         disabled=not bool(fournisseurs_list)
     )
-    # Update the main session state variable (redundant if callbacks work perfectly, but safe)
-    # st.session_state.selected_fournisseurs_session = selected_fournisseurs
 
     # --- Filter Data Based on Current Selection State ---
     current_selection = st.session_state.selected_fournisseurs_session
     if current_selection:
         df_display_filtered = df_base_filtered[df_base_filtered["Fournisseur"].isin(current_selection)].copy()
-        if df_display_filtered.empty and fournisseurs_list:
-            st.sidebar.warning("Aucun article trouvé pour cette sélection.")
-        elif not df_display_filtered.empty:
-            st.sidebar.info(f"{len(df_display_filtered)} articles sélectionnés.")
+        if df_display_filtered.empty and fournisseurs_list: st.sidebar.warning("Aucun article trouvé pour cette sélection.")
+        elif not df_display_filtered.empty: st.sidebar.info(f"{len(df_display_filtered)} articles sélectionnés.")
     else:
-        # Show all initially filtered suppliers if no selection or "Select All" unchecked and manual is empty
-        df_display_filtered = df_base_filtered.copy()
-        if not current_selection and fournisseurs_list:
-            st.sidebar.info("Affichage pour tous les fournisseurs filtrés initialement (aucune sélection spécifique).")
+        df_display_filtered = df_base_filtered.copy() # Default to all initially filtered if no selection
+        if not current_selection and fournisseurs_list: st.sidebar.info("Affichage pour tous les fournisseurs (aucune sélection).")
 
 
     # --- Tabs ---
@@ -356,64 +338,59 @@ if 'df_initial_filtered' in st.session_state and st.session_state.df_initial_fil
     # ========================= TAB 1: Prévision Commande =========================
     with tab1:
         st.header("Prévision Quantités à Commander"); st.caption("Utilise fournisseurs sélectionnés.")
-        # Use current_selection which reflects the effective selection
-        if not current_selection and fournisseurs_list:
-             st.info("Veuillez sélectionner un ou plusieurs fournisseurs dans la barre latérale.")
-        elif df_display_filtered.empty:
+        # Condition block using effective selection 'current_selection'
+        if df_display_filtered.empty:
              if current_selection: st.warning("Aucun article trouvé pour le(s) fournisseur(s) sélectionné(s).")
-             elif not fournisseurs_list: st.info("Aucun fournisseur valide trouvé.")
-             else: st.info("Veuillez sélectionner au moins un fournisseur.") # Should not happen if df_display_filtered logic is right
+             elif not fournisseurs_list: st.info("Aucun fournisseur valide trouvé dans le fichier.")
+             else: st.info("Veuillez sélectionner un ou plusieurs fournisseurs dans la barre latérale.")
         elif not semaine_columns: st.warning("Impossible de calculer: Colonnes ventes manquantes.")
         else:
             st.markdown("#### Paramètres"); col1_cmd, col2_cmd = st.columns(2)
             with col1_cmd: duree_semaines_cmd = st.number_input(label="⏳ Durée couverture (sem.)", min_value=1, max_value=260, value=4, step=1, key="duree_cmd")
             with col2_cmd: montant_minimum_input_cmd = st.number_input(label="💶 Montant min global (€)", min_value=0.0, max_value=1e12, value=0.0, step=50.0, format="%.2f", key="montant_min_cmd")
+
             if st.button("🚀 Calculer Quantités", key="calc_cmd_btn"):
-                # Pass the currently displayed data based on sidebar selection
+                # Pass df_display_filtered which reflects the current sidebar selection
                 with st.spinner("Calcul..."): result_cmd = calculer_quantite_a_commander(df_display_filtered, semaine_columns, montant_minimum_input_cmd, duree_semaines_cmd)
                 if result_cmd:
                     st.success("✅ Calcul OK."); (q_calc, vN1, v12N1, v12l, mt_calc) = result_cmd; df_res_cmd = df_display_filtered.copy()
-                    # Use clear, unique names for result columns
-                    df_res_cmd.loc[:, "Qte Cmdée"] = q_calc; df_res_cmd.loc[:, "Vts N-1 Total (calc)"] = vN1; df_res_cmd.loc[:, "Vts 12 N-1 Sim (calc)"] = v12N1; df_res_cmd.loc[:, "Vts 12 Dern. (calc)"] = v12l
-                    df_res_cmd.loc[:, "Tarif Ach."] = pd.to_numeric(df_res_cmd["Tarif d'achat"], errors='coerce').fillna(0); df_res_cmd.loc[:, "Total Cmd"] = df_res_cmd["Tarif Ach."] * df_res_cmd["Qte Cmdée"]; df_res_cmd.loc[:, "Stock Terme"] = df_res_cmd["Stock"] + df_res_cmd["Qte Cmdée"]
-                    st.session_state.calc_res_df = df_res_cmd; st.session_state.mt_calc = mt_calc; st.session_state.sel_fourn_calc_cmd = current_selection # Store selection used for this calc
+                    df_res_cmd["Qte Cmdée"] = q_calc; df_res_cmd["Vts N-1 Total (calc)"] = vN1; df_res_cmd["Vts 12 N-1 Sim (calc)"] = v12N1; df_res_cmd["Vts 12 Dern. (calc)"] = v12l
+                    df_res_cmd["Tarif Ach."] = pd.to_numeric(df_res_cmd["Tarif d'achat"], errors='coerce').fillna(0); df_res_cmd["Total Cmd"] = df_res_cmd["Tarif Ach."] * df_res_cmd["Qte Cmdée"]; df_res_cmd["Stock Terme"] = df_res_cmd["Stock"] + df_res_cmd["Qte Cmdée"]
+                    st.session_state.calc_res_df = df_res_cmd; st.session_state.mt_calc = mt_calc; st.session_state.sel_fourn_calc_cmd = current_selection # Store selection used
                     st.rerun()
                 else: st.error("❌ Calcul échoué.");
+
             if 'calc_res_df' in st.session_state and st.session_state.calc_res_df is not None:
-                # Check if results match CURRENT effective selection
+                # Compare result's selection state with current effective selection state
                 if st.session_state.sel_fourn_calc_cmd == current_selection:
                     st.markdown("---"); st.markdown("#### Résultats Commande"); df_cmd_disp = st.session_state.calc_res_df; mt_cmd_disp = st.session_state.mt_calc; sup_cmd_disp = st.session_state.sel_fourn_calc_cmd
                     st.metric(label="💰 Montant Total", value=f"{mt_cmd_disp:,.2f} €")
-                    # Min Warning
                     if len(sup_cmd_disp) == 1: sup_cmd = sup_cmd_disp[0];
                         if sup_cmd in min_order_dict: req_min = min_order_dict[sup_cmd];
                             if "Total Cmd" in df_cmd_disp.columns: act_tot = df_cmd_disp["Total Cmd"].sum();
                                 if req_min > 0 and act_tot < req_min: diff = req_min - act_tot; st.warning(f"⚠️ Min Non Atteint ({sup_cmd})\nMontant: **{act_tot:,.2f}€** | Requis: **{req_min:,.2f}€** (Manque: {diff:,.2f}€)")
                             else: logging.warning("Col 'Total Cmd' absente.")
-                    # Display Table
                     cols_req = ["Fournisseur", "AF_RefFourniss", "Référence Article", "Désignation Article", "Stock"]; cols_base = cols_req + ["Vts N-1 Total (calc)", "Vts 12 N-1 Sim (calc)", "Vts 12 Dern. (calc)", "Conditionnement", "Qte Cmdée", "Stock Terme", "Tarif Ach.", "Total Cmd"]
                     cols_disp = [c for c in cols_base if c in df_cmd_disp.columns];
                     if any(c not in df_cmd_disp.columns for c in cols_req): st.error("❌ Cols manquantes affichage.")
                     else: st.dataframe(df_cmd_disp[cols_disp].style.format({"Tarif Ach.": "{:,.2f}€", "Total Cmd": "{:,.2f}€", "Vts N-1 Total (calc)": "{:,.0f}", "Vts 12 N-1 Sim (calc)": "{:,.0f}", "Vts 12 Dern. (calc)": "{:,.0f}", "Stock": "{:,.0f}", "Conditionnement": "{:,.0f}", "Qte Cmdée": "{:,.0f}", "Stock Terme": "{:,.0f}"}, na_rep="-", thousands=","))
-                    # Export Logic
                     st.markdown("#### Export Commande"); df_exp_cmd = df_cmd_disp[df_cmd_disp["Qte Cmdée"] > 0].copy()
                     if not df_exp_cmd.empty:
                          out_cmd = io.BytesIO(); sheets_cr_cmd = 0
-                         # ... (Export logic - unchanged, uses sup_cmd_disp which is correct) ...
-                         try:
+                         try: # Export logic
                              with pd.ExcelWriter(out_cmd, engine="openpyxl") as writer_cmd:
                                  qty_c, price_c, tot_c = "Qte Cmdée", "Tarif Ach.", "Total Cmd"; export_cols_cmd = [c for c in cols_disp if c != 'Fournisseur']; formula_ok = False
                                  if all(c in export_cols_cmd for c in [qty_c, price_c, tot_c]):
                                      try: qty_idx, price_idx, tot_idx = export_cols_cmd.index(qty_c), export_cols_cmd.index(price_c), export_cols_cmd.index(tot_c); qty_l, price_l, tot_l = get_column_letter(qty_idx + 1), get_column_letter(price_idx + 1), get_column_letter(tot_idx + 1); formula_ok = True
                                      except: pass
                                  if formula_ok:
-                                     for sup_exp in sup_cmd_disp:
+                                     for sup_exp in sup_cmd_disp: # Iterate over suppliers for whom calc was run
                                          df_sup_exp = df_exp_cmd[df_exp_cmd["Fournisseur"] == sup_exp].copy();
                                          if not df_sup_exp.empty:
                                              df_sh_data = df_sup_exp[export_cols_cmd].copy(); n_rows = len(df_sh_data); tot_v = df_sh_data[tot_c].sum(); req_m = min_order_dict.get(sup_exp, 0); min_f = f"{req_m:,.2f}€" if req_m > 0 else "N/A"
                                              lbl_c = "Désignation Article" if "Désignation Article" in export_cols_cmd else export_cols_cmd[1]; tot_r = {c: "" for c in export_cols_cmd}; tot_r[lbl_c] = "TOTAL"; tot_r[tot_c] = tot_v; min_r = {c: "" for c in export_cols_cmd}; min_r[lbl_c] = "Min Requis"; min_r[tot_c] = min_f
                                              df_sh = pd.concat([df_sh_data, pd.DataFrame([tot_r]), pd.DataFrame([min_r])], ignore_index=True); s_name = sanitize_sheet_name(sup_exp)
-                                             try:
+                                             try: # Write sheet and formulas
                                                  df_sh.to_excel(writer_cmd, sheet_name=s_name, index=False); ws = writer_cmd.sheets[s_name];
                                                  for r in range(2, n_rows + 2): form = f"={qty_l}{r}*{price_l}{r}"; cell = ws[f"{tot_l}{r}"]; cell.value = form; cell.number_format = '#,##0.00€'
                                                  total_formula_row_cmd = n_rows + 2
@@ -426,13 +403,13 @@ if 'df_initial_filtered' in st.session_state and st.session_state.df_initial_fil
                               out_cmd.seek(0); fname = f"commande_{'multi' if len(sup_cmd_disp)>1 else sanitize_sheet_name(sup_cmd_disp[0])}_{pd.Timestamp.now():%Y%m%d_%H%M}.xlsx"
                               st.download_button(f"📥 Télécharger ({sheets_cr_cmd})", out_cmd, fname, key="dl_cmd_btn")
                     else: st.info("Aucune qté > 0 à exporter.")
-                else: st.info("Résultats précédents invalidés. Relancez calcul.")
+                else: st.info("Résultats précédents invalidés par changement sélection fournisseur. Relancez calcul.")
 
     # ====================== TAB 2: Analyse Rotation Stock ======================
     with tab2:
-        # ... (Tab 2 code remains largely unchanged, uses df_display_filtered) ...
+        # ... (Tab 2 code remains unchanged) ...
         st.header("Analyse Rotation Stocks"); st.caption("Utilise fournisseurs sélectionnés.")
-        if not current_selection and fournisseurs_list: st.info("Sélectionnez fournisseur(s).") # Check effective selection
+        if not current_selection and fournisseurs_list: st.info("Sélectionnez fournisseur(s).") # Use effective selection
         elif df_display_filtered.empty: st.warning("Aucun article trouvé.")
         elif not semaine_columns: st.warning("Colonnes ventes manquantes.")
         else:
@@ -441,12 +418,11 @@ if 'df_initial_filtered' in st.session_state and st.session_state.df_initial_fil
             with col2_r: st.markdown("##### Options Affichage"); show_all = st.checkbox("Afficher tout", value=st.session_state.show_all_rotation, key="show_all_rot_cb"); st.session_state.show_all_rotation = show_all; rot_thr = st.number_input("... ou ventes mens. <", 0.0, value=st.session_state.rotation_threshold_value, step=0.1, format="%.1f", key="rot_thr_in", disabled=show_all)
             if not show_all: st.session_state.rotation_threshold_value = rot_thr
             if st.button("🔄 Analyser Rotation", key="analyze_rot_btn"):
-                 with st.spinner("Analyse..."): df_rot_res = calculer_rotation_stock(df_display_filtered, semaine_columns, sel_p_w) # Use df_display_filtered
-                 if df_rot_res is not None: st.success("✅ Analyse terminée."); st.session_state.rot_res_df = df_rot_res; st.session_state.rot_p_lbl = sel_p_lbl; st.session_state.sel_fourn_calc_rot = current_selection; st.rerun() # Store current selection used
+                 with st.spinner("Analyse..."): df_rot_res = calculer_rotation_stock(df_display_filtered, semaine_columns, sel_p_w) # Use filtered data
+                 if df_rot_res is not None: st.success("✅ Analyse terminée."); st.session_state.rot_res_df = df_rot_res; st.session_state.rot_p_lbl = sel_p_lbl; st.session_state.sel_fourn_calc_rot = current_selection; st.rerun() # Store effective selection used
                  else: st.error("❌ Analyse échouée.");
             if 'rot_res_df' in st.session_state and st.session_state.rot_res_df is not None:
-                 if st.session_state.sel_fourn_calc_rot == current_selection: # Check if results match current effective selection
-                    # ... (Rest of Tab 2 display and export logic - unchanged, uses df_rot_orig = st.session_state.rot_res_df) ...
+                 if st.session_state.sel_fourn_calc_rot == current_selection: # Compare with effective selection
                     st.markdown("---"); st.markdown(f"#### Résultats Rotation ({st.session_state.get('rot_p_lbl', '')})"); df_rot_orig = st.session_state.rot_res_df; thr_disp = st.session_state.rotation_threshold_value; show_all_f = st.session_state.show_all_rotation
                     m_sales_col = "Ventes Moy Mensuel (Période)"; can_filt = False; df_rot_disp = pd.DataFrame()
                     if m_sales_col in df_rot_orig.columns: m_sales_ser = pd.to_numeric(df_rot_orig[m_sales_col], errors='coerce').fillna(0); can_filt = True
@@ -510,7 +486,7 @@ if 'df_initial_filtered' in st.session_state and st.session_state.df_initial_fil
         # ... (Tab 4 code remains unchanged) ...
         st.header("Simulation Forecast Annuel"); st.caption("Utilise fournisseurs sélectionnés & suppose N-1 = sem. -104 à -52."); st.warning("🚨 **Approximation Importante:** Saisonnalité mensuelle basée sur découpage approx. des 52 sem. N-1.")
         if df_display_filtered.empty:
-             if selected_fournisseurs: st.warning("Aucun article trouvé."); else: st.info("Sélectionnez fournisseur(s).")
+             if current_selection: st.warning("Aucun article trouvé."); else: st.info("Sélectionnez fournisseur(s).") # Use effective selection
         elif len(semaine_columns) < 104: st.warning("Données historiques insuffisantes (< 104 sem).")
         else:
             st.markdown("#### Paramètres")
@@ -527,20 +503,20 @@ if 'df_initial_filtered' in st.session_state and st.session_state.df_initial_fil
                  else:
                     curr_prog = st.session_state.get('forecast_prog_pct', 5.0); curr_obj = st.session_state.get('forecast_target_amount', 10000.0); prog_use = curr_prog if sim_t == 'Simple Progression' else 0; obj_use = curr_obj if sim_t == 'Objectif Montant' else 0
                     with st.spinner("Simulation..."): df_fcst_res = calculer_forecast_simulation(df_display_filtered, semaine_columns, sel_months_fcst, sim_t, prog_use, obj_use)
-                    if df_fcst_res is not None: st.success("✅ Simulation terminée."); st.session_state.forecast_result_df = df_fcst_res; st.session_state.forecast_params = {'suppliers': selected_fournisseurs, 'months': sel_months_fcst, 'type': sim_t, 'prog': prog_use, 'obj': obj_use}; st.rerun()
+                    if df_fcst_res is not None: st.success("✅ Simulation terminée."); st.session_state.forecast_result_df = df_fcst_res; st.session_state.forecast_params = {'suppliers': current_selection, 'months': sel_months_fcst, 'type': sim_t, 'prog': prog_use, 'obj': obj_use}; st.rerun() # Use current_selection
                     else: st.error("❌ Simulation échouée.");
             if 'forecast_result_df' in st.session_state and st.session_state.forecast_result_df is not None:
-                 current_params_disp = {'suppliers': selected_fournisseurs, 'months': sel_months_fcst, 'type': sim_t, 'prog': st.session_state.get('forecast_prog_pct', 5.0) if sim_t=='Simple Progression' else 0, 'obj': st.session_state.get('forecast_target_amount', 10000.0) if sim_t=='Objectif Montant' else 0}
-                 if st.session_state.get('forecast_params') == curr_params_disp:
+                 current_params_disp = {'suppliers': current_selection, 'months': sel_months_fcst, 'type': sim_t, 'prog': st.session_state.get('forecast_prog_pct', 5.0) if sim_t=='Simple Progression' else 0, 'obj': st.session_state.get('forecast_target_amount', 10000.0) if sim_t=='Objectif Montant' else 0}
+                 if st.session_state.get('forecast_params') == current_params_disp:
                     st.markdown("---"); st.markdown("#### Résultats Simulation")
                     df_fcst_disp = st.session_state.forecast_result_df;
                     mq_cols = [f"Qté Prév. {m}" for m in sel_months_fcst if f"Qté Prév. {m}" in df_fcst_disp.columns]; ma_cols = [f"Montant Prév. {m} (€)" for m in sel_months_fcst if f"Montant Prév. {m} (€)" in df_fcst_disp.columns]; n1m_cols = [f"Ventes N-1 {m}" for m in sel_months_fcst if f"Ventes N-1 {m}" in df_fcst_disp.columns]
-                    fcst_id = ["Fournisseur", "Référence Article", "Désignation Article", "Conditionnement", "Tarif d'achat"]; fcst_tot = ["Ventes N-1 Total (Mois Sélectionnés)", "Qté Totale Prév. (Mois Sel.)", "Montant Total Prév. (€) (Mois Sel.)"] # Adjusted total col names
+                    fcst_id = ["Fournisseur", "Référence Article", "Désignation Article", "Conditionnement", "Tarif d'achat"]; fcst_tot = ["Vts N-1 Tot (Mois Sel.)", "Qté Tot Prév (Mois Sel.)", "Mnt Tot Prév (€) (Mois Sel.)"] # Use renamed cols
                     fcst_disp_cols = fcst_id + fcst_tot + n1m_cols + mq_cols + ma_cols; fcst_disp_fin = [c for c in fcst_disp_cols if c in df_fcst_disp.columns]
                     if df_fcst_disp.empty: st.info("Aucun résultat.")
                     elif not fcst_disp_fin: st.error("Erreur: Colonnes résultats manquantes.")
                     else:
-                        fcst_fmters = {"Tarif d'achat": "{:,.2f}€", "Conditionnement": "{:,.0f}", "Ventes N-1 Total (Mois Sélectionnés)": "{:,.0f}", "Qté Totale Prév. (Mois Sel.)": "{:,.0f}", "Montant Total Prév. (€) (Mois Sel.)": "{:,.2f}€"} # Adjusted total col format keys
+                        fcst_fmters = {"Tarif d'achat": "{:,.2f}€", "Conditionnement": "{:,.0f}", "Vts N-1 Tot (Mois Sel.)": "{:,.0f}", "Qté Tot Prév (Mois Sel.)": "{:,.0f}", "Mnt Tot Prév (€) (Mois Sel.)": "{:,.2f}€"} # Use renamed cols
                         for c in n1m_cols: fcst_fmters[c] = "{:,.0f}";
                         for c in mq_cols: fcst_fmters[c] = "{:,.0f}";
                         for c in ma_cols: fcst_fmters[c] = "{:,.2f}€"
@@ -562,4 +538,4 @@ elif not uploaded_file:
     if st.button("🔄 Réinitialiser l'application"):
          keys_to_clear = list(st.session_state.keys())
          for key in keys_to_clear: del st.session_state[key]
-         st.rerun()
+         st.rerun() # Use st.rerun()
