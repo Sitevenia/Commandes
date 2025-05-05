@@ -145,8 +145,7 @@ def calculer_rotation_stock(df, semaine_columns, periode_semaines):
         if not semaines_analyse:
             st.warning("Aucune colonne vente pour analyse rotation.")
             return df_rotation
-        for col in semaines_analyse:
-            df_rotation[col] = pd.to_numeric(df_rotation[col], errors='coerce').fillna(0)
+        for col in semaines_analyse: df_rotation[col] = pd.to_numeric(df_rotation[col], errors='coerce').fillna(0)
         df_rotation["Unités Vendues (Période)"] = df_rotation[semaines_analyse].sum(axis=1)
         df_rotation["Ventes Moy Hebdo (Période)"] = df_rotation["Unités Vendues (Période)"] / nb_semaines_analyse if nb_semaines_analyse > 0 else 0.0
         avg_weeks_per_month = 52 / 12
@@ -162,18 +161,13 @@ def calculer_rotation_stock(df, semaine_columns, periode_semaines):
         df_rotation.loc[(df_rotation["Unités Vendues (Période)"] <= 0) & (denom_rot_unit <= 0), "Rotation Unités (Proxy)"] = 0.0
         df_rotation["COGS (Période)"] = df_rotation["Unités Vendues (Période)"] * df_rotation["Tarif d'achat"]
         df_rotation["Valeur Stock Actuel (€)"] = df_rotation["Stock"] * df_rotation["Tarif d'achat"]
-        denom_rot_val = df_rotation["Valeur Stock Actuel (€)"];
+        denom_rot_val = df_rotation["Valeur Stock Actuel (€)"]
         df_rotation["Rotation Valeur (Proxy)"] = np.divide(df_rotation["COGS (Période)"], denom_rot_val, out=np.full_like(denom_rot_val, np.inf, dtype=np.float64), where=denom_rot_val!=0)
         df_rotation["Rotation Valeur (Proxy)"].fillna(0, inplace=True)
         df_rotation.loc[(df_rotation["COGS (Période)"] <= 0) & (denom_rot_val <= 0), "Rotation Valeur (Proxy)"] = 0.0
         return df_rotation
-    except KeyError as e:
-        st.error(f"Erreur clé calc rotation: '{e}'.")
-        return None
-    except Exception as e:
-        st.error(f"Erreur inattendue calc rotation: {e}")
-        logging.exception("Error calc rotation:")
-        return None
+    except KeyError as e: st.error(f"Erreur clé calc rotation: '{e}'."); return None
+    except Exception as e: st.error(f"Erreur inattendue calc rotation: {e}"); logging.exception("Error calc rotation:"); return None
 
 def approx_weeks_to_months(week_columns_52):
     """Approximates month mapping for 52 consecutive week columns."""
@@ -325,7 +319,7 @@ def calculer_forecast_simulation_v3(df, all_semaine_columns, selected_months, si
         n1_cols = [f"Ventes N-1 {m}" for m in selected_months if f"Ventes N-1 {m}" in df_sim.columns]
         qty_cols = [f"Qté Prév. {m}" for m in selected_months]
         amt_cols = [f"Montant Prév. {m} (€)" for m in selected_months]
-        total_cols = ["Vts N-1 Tot (Mois Sel.)", "Qté Tot Prév (Mois Sel.)", "Mnt Tot Prév (€) (Mois Sel.)"]
+        total_cols = ["Vts N-1 Tot (Mois Sel.)", "Qté Totale Prév. (Mois Sel.)", "Mnt Tot Prév (€) (Mois Sel.)"]
 
         final_cols = id_cols + total_cols + n1_cols + qty_cols + amt_cols
         final_cols = [c for c in final_cols if c in df_sim.columns]
@@ -333,7 +327,7 @@ def calculer_forecast_simulation_v3(df, all_semaine_columns, selected_months, si
         grand_total_amount = tot_fin_amt.sum()
         df_sim.rename(columns={
             "Vts N-1 Tot (Mois Sel.)": "Vts N-1 Tot (Mois Sel.)",
-            "Qté Tot Prév (Mois Sel.)": "Qté Tot Prév (Mois Sel.)",
+            "Qté Totale Prév. (Mois Sel.)": "Qté Tot Prév (Mois Sel.)",
             "Mnt Tot Prév (€) (Mois Sel.)": "Mnt Tot Prév (€) (Mois Sel.)"
         }, inplace=True)
 
@@ -359,7 +353,7 @@ def render_supplier_checkboxes(tab_key_prefix, all_suppliers, default_select_all
     Returns the list of selected suppliers for this tab.
     """
     select_all_key = f"{tab_key_prefix}_select_all"
-    supplier_keys = {supplier: f"{tab_key_prefix}_cb_{sanitized_supplier_key(supplier)}" for supplier in all_suppliers}
+    supplier_keys = {supplier: f"{tab_key_prefix}_cb_{sanitize_sheet_name(supplier)}" for supplier in all_suppliers}
 
     # Initialize state for the "Select All" checkbox if it doesn't exist
     if select_all_key not in st.session_state:
@@ -417,9 +411,9 @@ def render_supplier_checkboxes(tab_key_prefix, all_suppliers, default_select_all
     logging.debug(f"Checkboxes rendered for {tab_key_prefix}. Selected: {len(selected_in_ui)}")
     return selected_in_ui
 
-def sanitized_supplier_key(supplier_name):
+def sanitize_supplier_key(supplier_name):
      """Creates a safe key for session state from supplier name."""
-     # Replace non-alphanumeric characters with underscore
+     # Replace non-alphanumeric characters with underscores
      # Also handle potential leading/trailing underscores or multiple underscores
      s = re.sub(r'\W+', '_', supplier_name)
      s = re.sub(r'^_+|_+$', '', s) # Remove leading/trailing underscores
@@ -922,60 +916,43 @@ if 'df_initial_filtered' in st.session_state and st.session_state.df_initial_fil
                     mq_cols = [f"Qté Prév. {m}" for m in sel_months_fcst if f"Qté Prév. {m}" in df_fcst_disp.columns]
                     ma_cols = [f"Montant Prév. {m} (€)" for m in sel_months_fcst if f"Montant Prév. {m} (€)" in df_fcst_disp.columns]
                     n1m_cols = [f"Ventes N-1 {m}" for m in sel_months_fcst if f"Ventes N-1 {m}" in df_fcst_disp.columns]
-                    fcst_disp_fin = df_fcst_disp.columns.tolist() # Colonnes déjà ordonnées
-
+                    fcst_id = ["Fournisseur", "Référence Article", "Désignation Article", "Conditionnement", "Tarif d'achat"]
+                    fcst_tot = ["Vts N-1 Tot (Mois Sel.)", "Qté Tot Prév (Mois Sel.)", "Mnt Tot Prév (€) (Mois Sel.)"]
+                    fcst_disp_cols = fcst_id + fcst_tot + n1m_cols + mq_cols + ma_cols
                     if df_fcst_disp.empty:
                         st.info("Aucun résultat.")
-                    elif not fcst_disp_fin:
-                        st.error("Erreur: Colonnes de résultats de prévision manquantes.")
+                    elif not fcst_disp_cols:
+                        st.error("Erreur: Colonnes résultats manquantes.")
                     else:
-                        # Définir les formateurs pour les colonnes attendues
-                        fcst_fmters_final = {}
-                        id_cols = ["Référence Article", "Désignation Article"]
-                        for col in df_fcst_disp.columns:
-                             if col not in id_cols: # Formater toutes les autres comme nombres entiers (Qté)
-                                 fcst_fmters_final[col] = "{:,.0f}"
-                             # Ajouter un formateur spécifique pour le tarif si besoin (normalement non affiché ici)
-                             # elif col == "Tarif d'achat": fcst_fmters_final[col] = "{:,.2f}€"
-
+                        fcst_fmters = {"Tarif d'achat": "{:,.2f}€", "Conditionnement": "{:,.0f}", "Vts N-1 Tot (Mois Sel.)": "{:,.0f}", "Qté Tot Prév (Mois Sel.)": "{:,.0f}", "Mnt Tot Prév (€) (Mois Sel.)": "{:,.2f}€"}
+                        for c in n1m_cols:
+                            fcst_fmters[c] = "{:,.0f}"
+                        for c in mq_cols:
+                            fcst_fmters[c] = "{:,.0f}"
+                        for c in ma_cols:
+                            fcst_fmters[c] = "{:,.2f}€"
+                        fcst_fmters_final = {k: v for k, v in fcst_fmters.items() if k in fcst_disp_cols}
                         try:
-                            st.dataframe(df_fcst_disp.style.format(fcst_fmters_final, na_rep="-", thousands=","))
+                            st.dataframe(df_fcst_disp[fcst_disp_cols].style.format(fcst_fmters_final, na_rep="-", thousands=","))
                         except Exception as e_fmt:
                             st.error(f"Erreur formatage affichage: {e_fmt}")
-                            st.dataframe(df_fcst_disp)
-
+                            st.dataframe(df_fcst_disp[fcst_disp_cols])
                         st.metric(label="Montant Total Général Prévisionnel (€)", value=f"{grand_total_disp:,.2f} €")
 
                         # Export Forecast Results
                         st.markdown("#### Export Simulation")
                         out_f = io.BytesIO()
-                        df_exp_f = df_fcst_disp.copy() # Exporter toutes les colonnes retournées
-                        # Ajouter le total général en bas pour l'export
-                        if not df_exp_f.empty:
-                            try:
-                                total_row_data = {}
-                                label_col_export = "Désignation Article" if "Désignation Article" in df_exp_f.columns else df_exp_f.columns[1]
-                                total_col_export = "Total Annuel"
-                                for col in df_exp_f.columns:
-                                    total_row_data[col] = ''
-                                total_row_data[label_col_export] = 'TOTAL'
-                                if total_col_export in df_exp_f.columns:
-                                    total_row_data[total_col_export] = df_exp_f[total_col_export].sum()
-                                total_row_fcst = pd.DataFrame([total_row_data])
-                                df_exp_f = pd.concat([df_exp_f, total_row_fcst], ignore_index=True)
-                            except Exception as e_total:
-                                logging.error(f"Err ajout total export forecast: {e_total}")
-
-                            try:
-                                with pd.ExcelWriter(out_f, engine="openpyxl") as w_f:
-                                    df_exp_f.to_excel(w_f, sheet_name=f"Forecast_{sim_t.replace(' ','_')}", index=False)
-                                out_f.seek(0)
-                                fb = f"forecast_{sim_t.replace(' ','_').lower()}"
-                                sups_f = selected_fournisseurs_tab4 # Utiliser sélection onglet
-                                f_fcst = f"{fb}_{'multi' if len(sups_f)>1 else sanitize_sheet_name(sups_f[0] if sups_f else 'NA')}_{pd.Timestamp.now():%Y%m%d_%H%M}.xlsx"
-                                st.download_button("📥 Télécharger Simulation", out_f, f_fcst, key="dl_fcst_btn")
-                            except Exception as eef:
-                                st.error(f"Err export forecast: {eef}")
+                        df_exp_f = df_fcst_disp[fcst_disp_cols].copy()
+                        try:
+                            with pd.ExcelWriter(out_f, engine="openpyxl") as w_f:
+                                df_exp_f.to_excel(w_f, sheet_name=f"Forecast_{sim_t.replace(' ','_')}", index=False)
+                            out_f.seek(0)
+                            fb = f"forecast_{sim_t.replace(' ','_').lower()}"
+                            sups_f = selected_fournisseurs_tab4 # Utiliser sélection onglet
+                            f_fcst = f"{fb}_{'multi' if len(sups_f)>1 else sanitize_sheet_name(sups_f[0] if sups_f else 'NA')}_{pd.Timestamp.now():%Y%m%d_%H%M}.xlsx"
+                            st.download_button("📥 Télécharger Simulation", out_f, f_fcst, key="dl_fcst_btn")
+                        except Exception as eef:
+                            st.error(f"Err export forecast: {eef}")
                  else:
                     st.info("Résultats simulation invalidés. Relancez.")
 
