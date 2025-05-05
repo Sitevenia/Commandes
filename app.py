@@ -417,49 +417,46 @@ if 'df_initial_filtered' in st.session_state and st.session_state.df_initial_fil
     min_order_dict = st.session_state.min_order_dict
     semaine_columns = st.session_state.semaine_columns
 
-    # --- Sidebar ---
-    st.sidebar.header("Filtres (pour Prévision & Rotation)")
+    # --- Main Content ---
+    st.header("Sélection des Fournisseurs")
+    st.caption("Cochez les fournisseurs à inclure dans les analyses.")
 
     # Ajouter une case à cocher pour sélectionner tous les fournisseurs
-    select_all_suppliers = st.sidebar.checkbox("🔄 Sélectionner tous les fournisseurs", key="select_all_suppliers_cb")
+    select_all_suppliers = st.checkbox("🔄 Sélectionner/Désélectionner tous les fournisseurs", key="select_all_suppliers_cb")
 
-    # Logique de sélection des fournisseurs
+    # Afficher la liste des fournisseurs avec des cases à cocher
+    selected_suppliers = []
     if select_all_suppliers:
-        selected_options = fournisseurs_list
+        selected_suppliers = fournisseurs_list
     else:
-        selected_options = st.sidebar.multiselect(
-            "👤 Fournisseur(s)",
-            options=fournisseurs_list,
-            default=st.session_state.supplier_multiselect_key,
-            key="supplier_multiselect_key"
-        )
+        selected_suppliers = st.session_state.get('selected_suppliers', [])
 
-    # Déterminer la liste effective des fournisseurs sélectionnés
-    if "Tous les fournisseurs" in selected_options:
-        current_selection = fournisseurs_list
-        st.sidebar.caption("Mode 'Tous les fournisseurs' activé.")
-    elif not selected_options and fournisseurs_list:
-        current_selection = fournisseurs_list
-        st.sidebar.caption("Affichage pour tous les fournisseurs (par défaut).")
-    else:
-        current_selection = selected_options
+    for supplier in fournisseurs_list:
+        if st.checkbox(supplier, value=(supplier in selected_suppliers)):
+            if supplier not in selected_suppliers:
+                selected_suppliers.append(supplier)
+        else:
+            if supplier in selected_suppliers:
+                selected_suppliers.remove(supplier)
+
+    st.session_state.selected_suppliers = selected_suppliers
 
     # Filtrer les données en fonction de la sélection effective
-    if current_selection:
-        df_display_filtered = df_base_filtered[df_base_filtered["Fournisseur"].isin(current_selection)].copy()
+    if selected_suppliers:
+        df_display_filtered = df_base_filtered[df_base_filtered["Fournisseur"].isin(selected_suppliers)].copy()
         if df_display_filtered.empty and fournisseurs_list:
-             if current_selection == fournisseurs_list and not df_base_filtered.empty:
-                 st.sidebar.warning("Aucun article trouvé après le filtrage initial.")
-             elif current_selection != fournisseurs_list:
-                 st.sidebar.warning("Aucun article trouvé pour cette sélection.")
+             if selected_suppliers == fournisseurs_list and not df_base_filtered.empty:
+                 st.warning("Aucun article trouvé après le filtrage initial.")
+             elif selected_suppliers != fournisseurs_list:
+                 st.warning("Aucun article trouvé pour cette sélection.")
         elif not df_display_filtered.empty:
-             st.sidebar.info(f"{len(df_display_filtered)} articles sélectionnés.")
+             st.info(f"{len(df_display_filtered)} articles sélectionnés.")
     else:
         df_display_filtered = pd.DataFrame(columns=df_base_filtered.columns)
         if fournisseurs_list:
-            st.sidebar.info("Aucun fournisseur sélectionné.")
+            st.info("Aucun fournisseur sélectionné.")
         else:
-            st.sidebar.warning("Aucun fournisseur à sélectionner trouvé dans le fichier.")
+            st.warning("Aucun fournisseur à sélectionner trouvé dans le fichier.")
 
     # --- Tabs ---
     tab1, tab2, tab3, tab4 = st.tabs(["Prévision Commande", "Analyse Rotation Stock", "Vérification Stock", "Simulation Forecast"])
@@ -468,8 +465,8 @@ if 'df_initial_filtered' in st.session_state and st.session_state.df_initial_fil
     with tab1:
         st.header("Prévision Quantités à Commander")
         st.caption("Utilise fournisseurs sélectionnés.")
-        if not current_selection and fournisseurs_list:
-            st.info("Veuillez sélectionner un ou plusieurs fournisseurs dans la barre latérale.")
+        if not selected_suppliers and fournisseurs_list:
+            st.info("Veuillez sélectionner un ou plusieurs fournisseurs dans la liste ci-dessus.")
         elif df_display_filtered.empty:
              pass
         elif not semaine_columns:
@@ -497,12 +494,12 @@ if 'df_initial_filtered' in st.session_state and st.session_state.df_initial_fil
                     df_res_cmd["Stock Terme"] = df_res_cmd["Stock"] + df_res_cmd["Qte Cmdée"]
                     st.session_state.calc_res_df = df_res_cmd
                     st.session_state.mt_calc = mt_calc
-                    st.session_state.sel_fourn_calc_cmd = current_selection
+                    st.session_state.sel_fourn_calc_cmd = selected_suppliers
                     st.rerun()
                 else:
                     st.error("❌ Calcul échoué.")
             if 'calc_res_df' in st.session_state and st.session_state.calc_res_df is not None:
-                if st.session_state.sel_fourn_calc_cmd == current_selection:
+                if st.session_state.sel_fourn_calc_cmd == selected_suppliers:
                     st.markdown("---")
                     st.markdown("#### Résultats Commande")
                     df_cmd_disp = st.session_state.calc_res_df
@@ -594,7 +591,7 @@ if 'df_initial_filtered' in st.session_state and st.session_state.df_initial_fil
     with tab2:
         st.header("Analyse Rotation Stocks")
         st.caption("Utilise fournisseurs sélectionnés.")
-        if not current_selection and fournisseurs_list:
+        if not selected_suppliers and fournisseurs_list:
             st.info("Sélectionnez fournisseur(s).")
         elif df_display_filtered.empty:
             st.warning("Aucun article trouvé.")
@@ -621,12 +618,12 @@ if 'df_initial_filtered' in st.session_state and st.session_state.df_initial_fil
                     st.success("✅ Analyse terminée.")
                     st.session_state.rot_res_df = df_rot_res
                     st.session_state.rot_p_lbl = sel_p_lbl
-                    st.session_state.sel_fourn_calc_rot = current_selection
+                    st.session_state.sel_fourn_calc_rot = selected_suppliers
                     st.rerun()
                  else:
                     st.error("❌ Analyse échouée.")
             if 'rot_res_df' in st.session_state and st.session_state.rot_res_df is not None:
-                 if st.session_state.sel_fourn_calc_rot == current_selection:
+                 if st.session_state.sel_fourn_calc_rot == selected_suppliers:
                     st.markdown("---")
                     st.markdown(f"#### Résultats Rotation ({st.session_state.get('rot_p_lbl', '')})")
                     df_rot_orig = st.session_state.rot_res_df
@@ -689,7 +686,7 @@ if 'df_initial_filtered' in st.session_state and st.session_state.df_initial_fil
                          with pd.ExcelWriter(out_r, engine="openpyxl") as wr_r:
                             df_exp_r.to_excel(wr_r, sheet_name=sh_name, index=False)
                          out_r.seek(0)
-                         sups_exp = current_selection
+                         sups_exp = selected_suppliers
                          f_rot = f"{f_base}_{'multi' if len(sups_exp)>1 else sanitize_sheet_name(sups_exp[0] if sups_exp else 'NA')}_{pd.Timestamp.now():%Y%m%d_%H%M}.xlsx"
                          dl_lbl = f"📥 Télécharger {'Filtrée' if not show_all_f else 'Complète'}" + (f" (<{thr_disp:.1f}/m)" if not show_all_f else "")
                          st.download_button(dl_lbl, out_r, f_rot, key="dl_rot_btn")
@@ -744,7 +741,7 @@ if 'df_initial_filtered' in st.session_state and st.session_state.df_initial_fil
         st.caption("Utilise fournisseurs sélectionnés & suppose N-1 = sem. -104 à -52.")
         st.warning("🚨 **Approximation Importante:** Saisonnalité mensuelle basée sur découpage approx. des 52 sem. N-1.")
         if df_display_filtered.empty:
-             if current_selection:
+             if selected_suppliers:
                  st.warning("Aucun article trouvé.")
              else:
                  st.info("Sélectionnez fournisseur(s).")
@@ -780,12 +777,12 @@ if 'df_initial_filtered' in st.session_state and st.session_state.df_initial_fil
                     if df_fcst_res is not None:
                         st.success("✅ Simulation terminée.")
                         st.session_state.forecast_result_df = df_fcst_res
-                        st.session_state.forecast_params = {'suppliers': current_selection, 'months': sel_months_fcst, 'type': sim_t, 'prog': prog_use, 'obj': obj_use}
+                        st.session_state.forecast_params = {'suppliers': selected_suppliers, 'months': sel_months_fcst, 'type': sim_t, 'prog': prog_use, 'obj': obj_use}
                         st.rerun()
                     else:
                         st.error("❌ Simulation échouée.")
             if 'forecast_result_df' in st.session_state and st.session_state.forecast_result_df is not None:
-                 current_params_disp = {'suppliers': current_selection, 'months': sel_months_fcst, 'type': sim_t, 'prog': st.session_state.get('forecast_prog_pct', 5.0) if sim_t=='Simple Progression' else 0, 'obj': st.session_state.get('forecast_target_amount', 10000.0) if sim_t=='Objectif Montant' else 0}
+                 current_params_disp = {'suppliers': selected_suppliers, 'months': sel_months_fcst, 'type': sim_t, 'prog': st.session_state.get('forecast_prog_pct', 5.0) if sim_t=='Simple Progression' else 0, 'obj': st.session_state.get('forecast_target_amount', 10000.0) if sim_t=='Objectif Montant' else 0}
                  if st.session_state.get('forecast_params') == current_params_disp:
                     st.markdown("---")
                     st.markdown("#### Résultats Simulation")
@@ -823,7 +820,7 @@ if 'df_initial_filtered' in st.session_state and st.session_state.df_initial_fil
                                 df_exp_f.to_excel(w_f, sheet_name=f"Forecast_{sim_t.replace(' ','_')}", index=False)
                             out_f.seek(0)
                             fb = f"forecast_{sim_t.replace(' ','_').lower()}"
-                            sups_f = current_selection
+                            sups_f = selected_suppliers
                             f_fcst = f"{fb}_{'multi' if len(sups_f)>1 else sanitize_sheet_name(sups_f[0] if sups_f else 'NA')}_{pd.Timestamp.now():%Y%m%d_%H%M}.xlsx"
                             st.download_button("📥 Télécharger Simulation", out_f, f_fcst, key="dl_fcst_btn")
                         except Exception as eef:
