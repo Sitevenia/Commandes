@@ -1,11 +1,12 @@
-def calculer_forecast_simulation_v2(df, all_semaine_columns, selected_months, sim_type, progression_pct=0, objectif_montant=0):
+def calculer_forecast_simulation_v2(df, all_semaine_columns, selected_month_names, sim_type, progression_pct=0, objectif_montant=0):
     """
     Effectue une simulation de prévision pour les MOIS SÉLECTIONNÉS en se basant
-    sur les données N-1 correspondantes, identifiées dynamiquement par l'année dans les noms de colonnes (format YYYYWW).
+    sur les données N-1 correspondantes, identifiées dynamiquement par l'année
+    dans les noms de colonnes (format YYYYWW).
 
     Args:
         df (pd.DataFrame): DataFrame filtré pour les fournisseurs sélectionnés.
-        all_semaine_columns (list): Liste complète des noms de colonnes de ventes hebdomadaires disponibles (ex: ['202301', ..., '202452']).
+        all_semaine_columns (list): Liste complète des noms de colonnes de ventes hebdomadaires (ex: ['202301',...,'202452']).
         selected_month_names (list): Liste des noms de mois sélectionnés (ex: ['Janvier', 'Février']).
         sim_type (str): 'Simple Progression' ou 'Objectif Montant'.
         progression_pct (float): Pourcentage de croissance pour la simulation simple.
@@ -17,62 +18,82 @@ def calculer_forecast_simulation_v2(df, all_semaine_columns, selected_months, si
     """
     try:
         if not isinstance(df, pd.DataFrame) or df.empty: st.warning("Aucune donnée pour simulation."); return None, 0.0
-        if not all_semaine_columns: st.error("Aucune colonne de ventes hebdomadaires n'a été identifiée."); return None, 0.0
-        if not selected_months: st.warning("Veuillez sélectionner au moins un mois."); return None, 0.0
+        if not all_semaine_columns: st.error("Aucune colonne de ventes hebdomadaires identifiée."); return None, 0.0
+        if not selected_month_names: st.warning("Veuillez sélectionner au moins un mois."); return None, 0.0
 
         required_cols = ["Référence Article", "Désignation Article", "Conditionnement", "Tarif d'achat"]
         if not all(col in df.columns for col in required_cols): missing = [col for col in required_cols if col not in df.columns]; st.error(f"Colonnes manquantes simulation : {', '.join(missing)}"); return None, 0.0
 
         # --- 1. Identifier Dynamiquement l'Année N et N-1 ---
         years_in_cols = set()
+        valid_week_cols_structure = [] # Garder seulement les colonnes valides
         for col in all_semaine_columns:
-            if isinstance(col, str) and len(col) >= 4 and col[:4].isdigit():
+            # Vérifier si la colonne est une string, a au moins 6 caractères,
+            # les 4 premiers sont des chiffres (année), les 2 suivants sont des chiffres (semaine)
+            if isinstance(col, str) and len(col) >= 6 and col[:4].isdigit() and col[4:6].isdigit():
                 years_in_cols.add(int(col[:4]))
-            # Ignorer les colonnes qui ne correspondent pas au format YYYY...
+                valid_week_cols_structure.append(col)
+            # Ignorer les colonnes qui ne correspondent pas au format YYYYWW
 
         if not years_in_cols:
-            st.error("Impossible de déterminer les années à partir des noms de colonnes de semaines. Vérifiez le format (ex: '202401').")
+            st.error("Impossible de déterminer les années à partir des noms de colonnes de semaines. Format attendu : 'YYYYWW' (ex: '202401').")
             return None, 0.0
+        if not valid_week_cols_structure:
+             st.error("Aucune colonne de semaine au format 'YYYYWW' valide trouvée.")
+             return None, 0.0
 
         current_year_n = max(years_in_cols)
         year_n_minus_1 = current_year_n - 1
         st.caption(f"(Année N détectée : {current_year_n}, Année N-1 utilisée pour la base : {year_n_minus_1})")
 
         # --- 2. Sélectionner les Colonnes N-1 ---
-        n1_week_cols = [col for col in all_semaine_columns if isinstance(col, str) and col.startswith(str(year_n_minus_1))]
+        n1_week_cols = [col for col in valid_week_cols_structure if col.startswith(str(year_n_minus_1))]
+        n1_week_cols.sort() # Assurer l'ordre chronologique WW01, WW02...
         logging.info(f"Forecast Sim v2: Identified {len(n1_week_cols)} columns starting with '{year_n_minus_1}' for N-1.")
 
         # --- 3. Valider les Colonnes N-1 ---
-        # Idéalement 52 ou 53 semaines. Mettons une limite raisonnable.
-        if len(n1_week_cols) < 50: # Ajuster si nécessaire (ex: 52)
-             st.error(f"Nombre insuffisant de colonnes trouvées pour l'année N-1 ({year_n_minus_1}). Trouvé: {len(n1_week_cols)}, Attendu: ~52.")
-             st.info(f"Colonnes N-1 recherchées : commençant par '{year_n_minus_1}'. Vérifiez les noms de colonnes dans votre fichier.")
+        if len(n1_week_cols) < 52: # Avoir au moins 52 semaines pour une année quasi complète
+             st.error(f"Nombre insuffisant de colonnes trouvées pour l'année N-1 ({year_n_minus_1}). Trouvé: {len(n1_week_cols)}, Attendu: 52 ou 53.")
+             st.info(f"Vérifiez que les colonnes de l'année {year_n_minus_1} existent et sont nommées au format '{year_n_minus_1}WW'.")
              return None, 0.0
-        # Optionnel : si on veut exactement 52, on peut trier et prendre les 52 premières/dernières
-        # n1_week_cols.sort() # Assurer l'ordre WW01, WW02...
-        # n1_week_cols = n1_week_cols[:52] # Prendre seulement 52 si plus existent
+        # Si on trouve plus de 52 (ex: semaine 53), on les garde pour le calcul mensuel
+        # mais on utilise une base de 52 pour approx_weeks_to_months si besoin
+        n1_week_cols_for_mapping = n1_week_cols[:52] # Utiliser 52 pour le mapping mensuel approx.
 
         df_sim = df[required_cols + ["Fournisseur"]].copy()
         df_sim["Tarif d'achat"] = pd.to_numeric(df_sim["Tarif d'achat"], errors='coerce').fillna(0)
         df_sim["Conditionnement"] = pd.to_numeric(df_sim["Conditionnement"], errors='coerce').fillna(1).apply(lambda x: 1 if x<=0 else int(x))
 
-        if not all(col in df.columns for col in n1_week_cols): st.error("Erreur interne: Des colonnes N-1 valides sont manquantes dans les données filtrées."); return None, 0.0
-        df_n1_sales = df[n1_week_cols].copy()
+        # Vérifier que les colonnes N-1 existent bien dans le DataFrame source 'df'
+        if not all(col in df.columns for col in n1_week_cols):
+            missing_in_df = [col for col in n1_week_cols if col not in df.columns]
+            st.error(f"Erreur interne: Les colonnes N-1 suivantes sont manquantes dans les données : {missing_in_df}"); return None, 0.0
+
+        df_n1_sales = df[n1_week_cols].copy() # Utiliser toutes les colonnes N-1 trouvées pour les ventes
         for col in n1_week_cols: df_n1_sales[col] = pd.to_numeric(df_n1_sales[col], errors='coerce').fillna(0)
 
         # --- 4. Mapper les semaines N-1 aux mois N-1 et calculer la saisonnalité ---
-        # Important: Utiliser les colonnes N-1 identifiées (n1_week_cols) pour le mapping
-        month_col_map_n1 = approx_weeks_to_months(n1_week_cols) # Le mapping fonctionne sur 52 colonnes
+        month_col_map_n1 = approx_weeks_to_months(n1_week_cols_for_mapping) # Mapper les 52 semaines standard
         total_n1_sales_selected_months = pd.Series(0.0, index=df_sim.index); monthly_sales_n1_selected = {}
-        for month in selected_months:
+
+        for month in selected_month_names:
             if month in month_col_map_n1 and month_col_map_n1[month]:
-                month_n1_cols = [col for col in month_col_map_n1[month] if col in df_n1_sales.columns] # Map N-1 weeks for this N-1 month
-                if month_n1_cols: sales_this_month = df_n1_sales[month_n1_cols].sum(axis=1); monthly_sales_n1_selected[month] = sales_this_month; total_n1_sales_selected_months += sales_this_month; df_sim[f"Ventes N-1 {month}"] = sales_this_month
-                else: monthly_sales_n1_selected[month] = pd.Series(0.0, index=df_sim.index); df_sim[f"Ventes N-1 {month}"] = 0.0
-            else: monthly_sales_n1_selected[month] = pd.Series(0.0, index=df_sim.index); df_sim[f"Ventes N-1 {month}"] = 0.0
-        df_sim["Vts N-1 Tot (Mois Sel.)"] = total_n1_sales_selected_months
+                # Utiliser les colonnes mappées pour récupérer les ventes N-1 correspondantes
+                month_n1_cols_mapped = [col for col in month_col_map_n1[month] if col in df_n1_sales.columns] # Colonnes N-1 pour ce mois approx
+                if month_n1_cols_mapped:
+                    sales_this_month = df_n1_sales[month_n1_cols_mapped].sum(axis=1)
+                    monthly_sales_n1_selected[month] = sales_this_month
+                    total_n1_sales_selected_months += sales_this_month
+                    df_sim[f"Ventes N-1 {month}"] = sales_this_month
+                else:
+                    monthly_sales_n1_selected[month] = pd.Series(0.0, index=df_sim.index); df_sim[f"Ventes N-1 {month}"] = 0.0
+            else:
+                logging.warning(f"Aucune colonne N-1 trouvée pour le mois approx. : {month}")
+                monthly_sales_n1_selected[month] = pd.Series(0.0, index=df_sim.index); df_sim[f"Ventes N-1 {month}"] = 0.0
+
+        df_sim["Vts N-1 Tot (Mois Sel.)"] = total_n1_sales_selected_months # Renommer ici pour utiliser dans l'affichage
         period_seasonality = {}; safe_total_n1_sales_selected = total_n1_sales_selected_months.replace(0, np.nan)
-        for month in selected_months:
+        for month in selected_month_names:
             if month in monthly_sales_n1_selected: period_seasonality[month] = (monthly_sales_n1_selected[month] / safe_total_n1_sales_selected).fillna(0)
             else: period_seasonality[month] = 0.0
 
@@ -81,18 +102,18 @@ def calculer_forecast_simulation_v2(df, all_semaine_columns, selected_months, si
         if sim_type == 'Simple Progression':
             prog_factor = 1 + (progression_pct / 100.0)
             # Appliquer la progression aux ventes N-1 de chaque mois sélectionné
-            for month in selected_months: base_monthly_forecast_qty[month] = monthly_sales_n1_selected.get(month, 0.0) * prog_factor
+            for month in selected_month_names: base_monthly_forecast_qty[month] = monthly_sales_n1_selected.get(month, 0.0) * prog_factor
         elif sim_type == 'Objectif Montant':
             if objectif_montant <= 0: st.error("Objectif > 0 requis."); return None, 0.0
+            logging.info(f"Forecast 'Objectif Montant': Distributing Objective={objectif_montant:.2f} based on N-1 Qty Seasonality.")
             total_n1_sales_check = total_n1_sales_selected_months.sum()
             if total_n1_sales_check <= 0:
-                st.warning("Ventes N-1 nulles. Répartition égale tentée."); num_sel_m = len(selected_months);
+                st.warning("Ventes N-1 nulles pour mois sélectionnés. Répartition égale tentée."); num_sel_m = len(selected_month_names);
                 if num_sel_m == 0: return None, 0.0
                 amt_per_m = objectif_montant / num_sel_m
-                for month in selected_months: base_monthly_forecast_qty[month] = np.divide(amt_per_m, df_sim["Tarif d'achat"], out=np.zeros_like(df_sim["Tarif d'achat"], dtype=float), where=df_sim["Tarif d'achat"]!=0)
+                for month in selected_month_names: base_monthly_forecast_qty[month] = np.divide(amt_per_m, df_sim["Tarif d'achat"], out=np.zeros_like(df_sim["Tarif d'achat"], dtype=float), where=df_sim["Tarif d'achat"]!=0)
             else:
-                # Distribuer l'objectif basé sur la saisonnalité Qty N-1 de la période
-                for month in selected_months:
+                for month in selected_month_names:
                     target_amt_m = objectif_montant * period_seasonality.get(month, 0.0)
                     base_monthly_forecast_qty[month] = np.divide(target_amt_m, df_sim["Tarif d'achat"], out=np.zeros_like(df_sim["Tarif d'achat"], dtype=float), where=df_sim["Tarif d'achat"]!=0)
         else: st.error("Type sim non reconnu."); return None, 0.0
@@ -101,16 +122,17 @@ def calculer_forecast_simulation_v2(df, all_semaine_columns, selected_months, si
         df_result = df_sim[["Fournisseur", "Référence Article", "Désignation Article"]].copy()
         df_result["Conditionnement"] = df_sim["Conditionnement"]; df_result["Tarif d'achat"] = df_sim["Tarif d'achat"]
         total_adjusted_qty_annual = pd.Series(0.0, index=df_result.index)
-        all_month_cols = list(calendar.month_name)[1:]
+        all_month_cols = list(calendar.month_name)[1:] # Tous les mois de l'année
 
         for i, month in enumerate(all_month_cols):
-            month_qty_col = f"{month}" # Nom simplifié
-            if month in selected_months and month in base_monthly_forecast_qty:
+            month_qty_col = f"{month}" # Nom de colonne = Nom du mois
+            if month in selected_month_names and month in base_monthly_forecast_qty:
                  base_qty = pd.to_numeric(base_monthly_forecast_qty[month], errors='coerce').fillna(0); cond = df_sim["Conditionnement"]
                  adjusted_qty = (np.ceil(np.divide(base_qty, cond, out=np.zeros_like(base_qty, dtype=float), where=cond!=0)) * cond).fillna(0).astype(int)
                  df_result[month_qty_col] = adjusted_qty
                  total_adjusted_qty_annual += adjusted_qty
-            else: df_result[month_qty_col] = 0 # Mettre 0 pour les mois non simulés
+            else:
+                 df_result[month_qty_col] = 0 # Mettre 0 pour les mois non simulés
 
         df_result["Total Annuel"] = total_adjusted_qty_annual
 
@@ -131,7 +153,7 @@ def calculer_forecast_simulation_v2(df, all_semaine_columns, selected_months, si
         logging.exception("Error during forecast simulation calculation v2:")
         return None, 0.0
 
-
+# --- (Keep sanitize_sheet_name, render_supplier_checkboxes) ---
 def sanitize_sheet_name(name):
     """ Removes invalid characters for Excel sheet names and truncates. """
     if not isinstance(name, str): name = str(name)
@@ -140,24 +162,19 @@ def sanitize_sheet_name(name):
     if sanitized.endswith("'"): sanitized = sanitized[:-1] + "_"
     return sanitized[:31]
 
-# --- Function to render supplier checkboxes ---
 def render_supplier_checkboxes(tab_key_prefix, all_suppliers, default_select_all=False):
     """ Renders supplier checkboxes and returns selected list for the tab. """
     select_all_key = f"{tab_key_prefix}_select_all"
     supplier_keys = {supplier: f"{tab_key_prefix}_cb_{sanitized_supplier_key(supplier)}" for supplier in all_suppliers}
-
     if select_all_key not in st.session_state: st.session_state[select_all_key] = default_select_all
     for key in supplier_keys.values():
         if key not in st.session_state: st.session_state[key] = st.session_state[select_all_key]
-
     def toggle_all():
         is_checked = st.session_state[select_all_key]
         for key in supplier_keys.values(): st.session_state[key] = is_checked
-
     def check_individual():
         all_checked = all(st.session_state.get(key, False) for key in supplier_keys.values())
         if st.session_state[select_all_key] != all_checked: st.session_state[select_all_key] = all_checked
-
     with st.expander("👤 Sélectionner Fournisseurs", expanded=True):
         st.checkbox("Sélectionner / Désélectionner Tout", key=select_all_key, on_change=toggle_all, disabled=not bool(all_suppliers))
         st.markdown("---")
@@ -167,6 +184,7 @@ def render_supplier_checkboxes(tab_key_prefix, all_suppliers, default_select_all
             is_checked = cols[col_idx].checkbox(supplier, key=key, value=st.session_state.get(key, False), on_change=check_individual)
             if is_checked: selected_in_ui.append(supplier)
             col_idx = (col_idx + 1) % num_cols
+    logging.debug(f"Checkboxes rendered for {tab_key_prefix}. Selected: {len(selected_in_ui)}")
     return selected_in_ui
 
 def sanitized_supplier_key(supplier_name):
@@ -183,31 +201,28 @@ st.title("📦 Application Prévision Commande & Analyse Rotation")
 uploaded_file = st.file_uploader("📁 Charger le fichier Excel principal", type=["xlsx", "xls"], key="fileUploader")
 
 # --- Initialize Session State ---
-# ... (garder les initialisations existantes) ...
+# ... (keep initialization block, maybe add forecast_grand_total) ...
 default_values = {
     'df_full': None, 'min_order_dict': {}, 'df_initial_filtered': pd.DataFrame(),
     'semaine_columns': [], 'calculation_result_df': None, 'rotation_result_df': None,
-    'forecast_result_df': None, 'forecast_grand_total': 0.0, # Nouveau pour le total forecast
+    'forecast_result_df': None, 'forecast_grand_total': 0.0, # Initialize forecast total
     'rotation_threshold_value': 1.0, 'show_all_rotation': True,
     'forecast_selected_months': list(calendar.month_name)[1:],
     'forecast_sim_type_index': 0, 'forecast_prog_pct': 5.0,
     'forecast_target_amount': 10000.0,
     'sel_fourn_calc_cmd': [],
     'sel_fourn_calc_rot': []
-    # Checkbox states will be initialized dynamically by the render function
+    # Checkbox states initialized dynamically
 }
 for key, default_value in default_values.items():
     if key not in st.session_state:
         st.session_state[key] = default_value
 
-
 # --- Data Loading and Initial Processing ---
+# ... (keep data loading block - unchanged) ...
 if uploaded_file and st.session_state.df_full is None:
     logging.info(f"New file uploaded: {uploaded_file.name}. Processing...")
-    keys_to_clear_on_new_file = ['df_full', 'df_initial_filtered', 'semaine_columns',
-                                 'calculation_result_df', 'rotation_result_df', 'forecast_result_df',
-                                 'min_order_dict', 'sel_fourn_calc_cmd', 'sel_fourn_calc_rot',
-                                 'forecast_grand_total']
+    keys_to_clear_on_new_file = ['df_full', 'df_initial_filtered', 'semaine_columns', 'calculation_result_df', 'rotation_result_df', 'forecast_result_df', 'min_order_dict', 'sel_fourn_calc_cmd', 'sel_fourn_calc_rot', 'forecast_grand_total']
     dynamic_keys = [k for k in st.session_state if k.startswith(('tab1_', 'tab2_', 'tab4_'))]
     keys_to_clear_on_new_file.extend(dynamic_keys)
     for key in keys_to_clear_on_new_file:
@@ -238,9 +253,9 @@ if uploaded_file and st.session_state.df_full is None:
             start_col_index = 12; semaine_cols_temp = []
             if len(df.columns) > start_col_index:
                 potential_week_cols = df.columns[start_col_index:].tolist(); exclude_cols = ["Tarif d'achat", "Conditionnement", "Stock", "Total", "Stock à terme", "Ventes N-1", "Ventes 12 semaines identiques N-1", "Ventes 12 dernières semaines", "Quantité à commander", "Fournisseur", "AF_RefFourniss", "Référence Article", "Désignation Article"]
-                semaine_cols_temp = [col for col in potential_week_cols if col not in exclude_cols and pd.api.types.is_numeric_dtype(df.get(col, pd.Series(dtype=float)).dtype)]
-            st.session_state.semaine_columns = semaine_cols_temp
-            if not semaine_cols_temp: logging.warning("No week columns identified.")
+                semaine_cols_temp = [col for col in potential_week_cols if col not in exclude_cols and isinstance(col, str) and len(col) >= 6 and col[:4].isdigit() and col[4:6].isdigit()] # Filter for YYYYWW format
+            st.session_state.semaine_columns = sorted(semaine_cols_temp) # Sort columns chronologically
+            if not semaine_cols_temp: logging.warning("No valid week columns (YYYYWW format) identified.")
             essential_numeric_cols = ["Stock", "Conditionnement", "Tarif d'achat"]; missing_essential = False
             for col in essential_numeric_cols:
                  if col in df_init_filtered.columns: df_init_filtered[col] = pd.to_numeric(df_init_filtered[col], errors='coerce').fillna(0)
@@ -251,7 +266,6 @@ if uploaded_file and st.session_state.df_full is None:
         except Exception as e_filter_other: st.error(f"❌ Erreur filtrage initial : {e_filter_other}"); st.stop()
     except Exception as e_load: st.error(f"❌ Erreur lecture fichier : {e_load}"); logging.exception("File loading error:"); st.stop()
 
-
 # --- Main App UI ---
 if 'df_initial_filtered' in st.session_state and st.session_state.df_initial_filtered is not None:
 
@@ -259,9 +273,9 @@ if 'df_initial_filtered' in st.session_state and st.session_state.df_initial_fil
     df_base_filtered = st.session_state.get('df_initial_filtered', pd.DataFrame())
     fournisseurs_list_all = sorted(df_base_filtered["Fournisseur"].unique().tolist()) if not df_base_filtered.empty and "Fournisseur" in df_base_filtered.columns else []
     min_order_dict = st.session_state.min_order_dict
-    semaine_columns = st.session_state.semaine_columns
+    semaine_columns = st.session_state.semaine_columns # Already sorted on load
 
-    # --- NO SIDEBAR ---
+    # --- NO SIDEBAR for supplier selection ---
 
     # --- Tabs ---
     tab1, tab2, tab3, tab4 = st.tabs(["Prévision Commande", "Analyse Rotation Stock", "Vérification Stock", "Simulation Forecast"])
@@ -272,23 +286,15 @@ if 'df_initial_filtered' in st.session_state and st.session_state.df_initial_fil
 
         # --- Supplier Selection UI for Tab 1 ---
         selected_fournisseurs_tab1 = render_supplier_checkboxes("tab1", fournisseurs_list_all, default_select_all=True)
-
-        # Filter data for THIS tab
         if selected_fournisseurs_tab1:
             df_display_tab1 = df_base_filtered[df_base_filtered["Fournisseur"].isin(selected_fournisseurs_tab1)].copy()
             st.caption(f"{len(df_display_tab1)} articles pour {len(selected_fournisseurs_tab1)} fournisseur(s) sélectionné(s).")
-        else:
-            df_display_tab1 = pd.DataFrame(columns=df_base_filtered.columns) # Empty if no selection
+        else: df_display_tab1 = pd.DataFrame(columns=df_base_filtered.columns)
+        st.markdown("---")
 
-        st.markdown("---") # Separator
-
-        # Conditions based on tab-specific filtering
-        if not selected_fournisseurs_tab1:
-            st.info("Veuillez sélectionner un ou plusieurs fournisseurs ci-dessus pour lancer le calcul.")
-        elif df_display_tab1.empty and selected_fournisseurs_tab1:
-             st.warning("Aucun article trouvé pour le(s) fournisseur(s) sélectionné(s).")
-        elif not semaine_columns:
-            st.warning("Impossible de calculer: Colonnes ventes manquantes.")
+        if not selected_fournisseurs_tab1: st.info("Veuillez sélectionner un ou plusieurs fournisseurs ci-dessus.")
+        elif df_display_tab1.empty: st.warning("Aucun article trouvé pour le(s) fournisseur(s) sélectionné(s).")
+        elif not semaine_columns: st.warning("Impossible de calculer: Colonnes ventes manquantes.")
         else:
             st.markdown("#### Paramètres"); col1_cmd, col2_cmd = st.columns(2)
             with col1_cmd: duree_semaines_cmd = st.number_input(label="⏳ Durée couverture (sem.)", min_value=1, max_value=260, value=4, step=1, key="duree_cmd")
@@ -299,22 +305,25 @@ if 'df_initial_filtered' in st.session_state and st.session_state.df_initial_fil
                     st.success("✅ Calcul OK."); (q_calc, vN1, v12N1, v12l, mt_calc) = result_cmd; df_res_cmd = df_display_tab1.copy()
                     df_res_cmd["Qte Cmdée"] = q_calc; df_res_cmd["Vts N-1 Total (calc)"] = vN1; df_res_cmd["Vts 12 N-1 Sim (calc)"] = v12N1; df_res_cmd["Vts 12 Dern. (calc)"] = v12l
                     df_res_cmd["Tarif Ach."] = pd.to_numeric(df_res_cmd["Tarif d'achat"], errors='coerce').fillna(0); df_res_cmd["Total Cmd"] = df_res_cmd["Tarif Ach."] * df_res_cmd["Qte Cmdée"]; df_res_cmd["Stock Terme"] = df_res_cmd["Stock"] + df_res_cmd["Qte Cmdée"]
-                    st.session_state.calc_res_df = df_res_cmd; st.session_state.mt_calc = mt_calc; st.session_state.sel_fourn_calc_cmd = selected_fournisseurs_tab1 # Store tab-specific selection
+                    st.session_state.calc_res_df = df_res_cmd; st.session_state.mt_calc = mt_calc; st.session_state.sel_fourn_calc_cmd = selected_fournisseurs_tab1
                     st.rerun()
                 else: st.error("❌ Calcul échoué.");
             if 'calc_res_df' in st.session_state and st.session_state.calc_res_df is not None:
-                if st.session_state.sel_fourn_calc_cmd == selected_fournisseurs_tab1: # Compare with tab-specific selection
+                if st.session_state.sel_fourn_calc_cmd == selected_fournisseurs_tab1: # Compare with tab's current selection
                     st.markdown("---"); st.markdown("#### Résultats Commande"); df_cmd_disp = st.session_state.calc_res_df; mt_cmd_disp = st.session_state.mt_calc; sup_cmd_disp = st.session_state.sel_fourn_calc_cmd
                     st.metric(label="💰 Montant Total", value=f"{mt_cmd_disp:,.2f} €")
-                    if len(sup_cmd_disp) == 1: sup_cmd = sup_cmd_disp[0];
+                    if len(sup_cmd_disp) == 1: # Min Warning
+                        sup_cmd = sup_cmd_disp[0];
                         if sup_cmd in min_order_dict: req_min = min_order_dict.get(sup_cmd, 0);
                             if "Total Cmd" in df_cmd_disp.columns: act_tot = df_cmd_disp["Total Cmd"].sum();
                                 if req_min > 0 and act_tot < req_min: diff = req_min - act_tot; st.warning(f"⚠️ Min Non Atteint ({sup_cmd})\nMontant: **{act_tot:,.2f}€** | Requis: **{req_min:,.2f}€** (Manque: {diff:,.2f}€)")
                             else: logging.warning("Col 'Total Cmd' absente.")
+                    # Display Table
                     cols_req = ["Fournisseur", "AF_RefFourniss", "Référence Article", "Désignation Article", "Stock"]; cols_base = cols_req + ["Vts N-1 Total (calc)", "Vts 12 N-1 Sim (calc)", "Vts 12 Dern. (calc)", "Conditionnement", "Qte Cmdée", "Stock Terme", "Tarif Ach.", "Total Cmd"]
                     cols_disp = [c for c in cols_base if c in df_cmd_disp.columns];
                     if any(c not in df_cmd_disp.columns for c in cols_req): st.error("❌ Cols manquantes affichage.")
                     else: st.dataframe(df_cmd_disp[cols_disp].style.format({"Tarif Ach.": "{:,.2f}€", "Total Cmd": "{:,.2f}€", "Vts N-1 Total (calc)": "{:,.0f}", "Vts 12 N-1 Sim (calc)": "{:,.0f}", "Vts 12 Dern. (calc)": "{:,.0f}", "Stock": "{:,.0f}", "Conditionnement": "{:,.0f}", "Qte Cmdée": "{:,.0f}", "Stock Terme": "{:,.0f}"}, na_rep="-", thousands=","))
+                    # Export Logic
                     st.markdown("#### Export Commande"); df_exp_cmd = df_cmd_disp[df_cmd_disp["Qte Cmdée"] > 0].copy()
                     if not df_exp_cmd.empty:
                          out_cmd = io.BytesIO(); sheets_cr_cmd = 0
@@ -378,9 +387,7 @@ if 'df_initial_filtered' in st.session_state and st.session_state.df_initial_fil
                     if m_sales_col in df_rot_orig.columns: m_sales_ser = pd.to_numeric(df_rot_orig[m_sales_col], errors='coerce').fillna(0); can_filt = True
                     else: st.warning(f"Col '{m_sales_col}' non trouvée.")
                     if show_all_f: df_rot_disp = df_rot_orig.copy(); st.caption(f"Affichage {len(df_rot_disp)} articles.")
-                    elif can_filt: # Corrected Filter Structure
-                        try: df_rot_disp = df_rot_orig[m_sales_ser < thr_disp].copy(); st.caption(f"Filtre: Ventes < {thr_disp:.1f}/mois. {len(df_rot_disp)} / {len(df_rot_orig)} articles.")
-                        except Exception as ef: st.error(f"Err filtre: {ef}"); df_rot_disp = df_rot_orig.copy()
+                    elif can_filt: try: df_rot_disp = df_rot_orig[m_sales_ser < thr_disp].copy(); st.caption(f"Filtre: Ventes < {thr_disp:.1f}/mois. {len(df_rot_disp)} / {len(df_rot_orig)} articles.") except Exception as ef: st.error(f"Err filtre: {ef}"); df_rot_disp = df_rot_orig.copy()
                     else: df_rot_disp = df_rot_orig.copy();
                     cols_rot = ["AF_RefFourniss", "Référence Article", "Désignation Article", "Tarif d'achat", "Stock", "Unités Vendues (Période)", "Ventes Moy Hebdo (Période)", "Ventes Moy Mensuel (Période)", "Semaines Stock (WoS)", "Rotation Unités (Proxy)", "Valeur Stock Actuel (€)", "COGS (Période)", "Rotation Valeur (Proxy)"]
                     cols_rot_fin = [c for c in cols_rot if c in df_rot_disp.columns]
@@ -411,10 +418,12 @@ if 'df_initial_filtered' in st.session_state and st.session_state.df_initial_fil
                     else: st.info("Aucune donnée à exporter.")
                  else: st.info("Résultats analyse invalidés. Relancez.")
 
+
     # ========================= TAB 3: Vérification Stock =========================
     with tab3:
-        st.header("Vérification des Stocks Négatifs"); st.caption("Analyse tous articles du fichier.")
-        df_neg_src = st.session_state.get('df_full', None) # Use df_full
+        # ... (Tab 3 code remains unchanged - independent of supplier selection) ...
+        st.header("Vérification Stocks Négatifs"); st.caption("Analyse tous articles du fichier.")
+        df_neg_src = st.session_state.get('df_full', None)
         if df_neg_src is None: st.warning("Données non chargées.")
         elif df_neg_src.empty: st.warning("Aucune donnée dans 'Tableau final'.")
         else:
@@ -422,7 +431,7 @@ if 'df_initial_filtered' in st.session_state and st.session_state.df_initial_fil
             if stock_c not in df_neg_src.columns: st.error(f"Colonne '{stock_c}' non trouvée.")
             else:
                 df_neg = df_neg_src[df_neg_src[stock_c] < 0].copy()
-                if df_neg.empty: st.success("✅ Aucun stock négatif détecté dans l'ensemble du fichier.")
+                if df_neg.empty: st.success("✅ Aucun stock négatif.")
                 else:
                     st.warning(f"⚠️ **{len(df_neg)} article(s) avec stock négatif !**"); cols_neg = ["Fournisseur", "AF_RefFourniss", "Référence Article", "Désignation Article", "Stock"]; cols_neg_fin = [c for c in cols_neg if c in df_neg.columns]
                     if not cols_neg_fin: st.error("Cols manquantes affichage.")
@@ -449,8 +458,8 @@ if 'df_initial_filtered' in st.session_state and st.session_state.df_initial_fil
 
         if not selected_fournisseurs_tab4: st.info("Veuillez sélectionner un ou plusieurs fournisseurs ci-dessus.")
         elif df_display_tab4.empty: st.warning("Aucun article trouvé.")
-        elif not semaine_columns or len(semaine_columns) < 52: # Check needs at least 52 for N-1 calc in function
-            st.warning("Données historiques insuffisantes (moins de 52 colonnes ventes identifiées).")
+        elif not semaine_columns or len(semaine_columns) < 52: # Adjusted check to >= 52
+            st.warning("Données historiques insuffisantes (moins de 52 colonnes ventes identifiées pour N et N-1).")
         else:
             st.markdown("#### Paramètres")
             all_months = list(calendar.month_name)[1:]; default_months = st.session_state.get('forecast_selected_months', all_months); sel_months_fcst = st.multiselect("📅 Mois simulation:", all_months, default_months, key="fcst_months_sel"); st.session_state.forecast_selected_months = sel_months_fcst
@@ -466,33 +475,29 @@ if 'df_initial_filtered' in st.session_state and st.session_state.df_initial_fil
                  else:
                     curr_prog = st.session_state.get('forecast_prog_pct', 5.0); curr_obj = st.session_state.get('forecast_target_amount', 10000.0); prog_use = curr_prog if sim_t == 'Simple Progression' else 0; obj_use = curr_obj if sim_t == 'Objectif Montant' else 0
                     with st.spinner("Simulation..."):
-                        # Utiliser la fonction V2
+                        # Utiliser la fonction V2 (calculer_forecast_simulation_v2)
                         df_fcst_res, grand_total = calculer_forecast_simulation_v2(df_display_tab4, semaine_columns, sel_months_fcst, sim_t, prog_use, obj_use)
-                    if df_fcst_res is not None:
-                        st.success("✅ Simulation terminée."); st.session_state.forecast_result_df = df_fcst_res; st.session_state.forecast_grand_total = grand_total
-                        st.session_state.forecast_params = {'suppliers': selected_fournisseurs_tab4, 'months': sel_months_fcst, 'type': sim_t, 'prog': prog_use, 'obj': obj_use}
-                        st.rerun()
+                    if df_fcst_res is not None: st.success("✅ Simulation terminée."); st.session_state.forecast_result_df = df_fcst_res; st.session_state.forecast_grand_total = grand_total; st.session_state.forecast_params = {'suppliers': selected_fournisseurs_tab4, 'months': sel_months_fcst, 'type': sim_t, 'prog': prog_use, 'obj': obj_use}; st.rerun() # Store tab-specific selection
                     else: st.error("❌ Simulation échouée.");
             if 'forecast_result_df' in st.session_state and st.session_state.forecast_result_df is not None:
-                 # Comparer avec la sélection de cet onglet
+                 # Compare results with current parameters and THIS TAB's supplier selection
                  current_params_disp = {'suppliers': selected_fournisseurs_tab4, 'months': sel_months_fcst, 'type': sim_t, 'prog': st.session_state.get('forecast_prog_pct', 5.0) if sim_t=='Simple Progression' else 0, 'obj': st.session_state.get('forecast_target_amount', 10000.0) if sim_t=='Objectif Montant' else 0}
                  if st.session_state.get('forecast_params') == current_params_disp:
                     st.markdown("---"); st.markdown("#### Résultats Simulation")
                     df_fcst_disp = st.session_state.forecast_result_df; grand_total_disp = st.session_state.forecast_grand_total
 
                     # Utiliser les colonnes retournées par la fonction v2
-                    fcst_disp_fin = df_fcst_disp.columns.tolist() # Colonnes déjà ordonnées par la fonction
+                    fcst_disp_fin = df_fcst_disp.columns.tolist() # Colonnes déjà ordonnées
 
                     if df_fcst_disp.empty: st.info("Aucun résultat.")
                     elif not fcst_disp_fin: st.error("Erreur: Colonnes résultats manquantes.")
                     else:
-                        # Définir les formateurs pour les colonnes attendues
-                        fcst_fmters = {"Tarif d'achat": "{:,.2f}€", "Conditionnement": "{:,.0f}", "Vts N-1 Tot (Mois Sel.)": "{:,.0f}", "Qté Tot Prév (Mois Sel.)": "{:,.0f}", "Mnt Tot Prév (€) (Mois Sel.)": "{:,.2f}€"}
-                        for m in list(calendar.month_name)[1:]: # Formater tous les mois potentiels
-                            if m in fcst_disp_fin: fcst_fmters[m] = "{:,.0f}" # Quantités prévues
-                            if f"Ventes N-1 {m}" in fcst_disp_fin: fcst_fmters[f"Ventes N-1 {m}"] = "{:,.0f}"
-                            if f"Montant Prév. {m} (€)" in fcst_disp_fin: fcst_fmters[f"Montant Prév. {m} (€)"] = "{:,.2f}€"
-                        fcst_fmters_final = {k: v for k, v in fcst_fmters.items() if k in fcst_disp_fin} # Appliquer uniquement aux colonnes présentes
+                        # Définir les formateurs pour les colonnes attendues (plus simple)
+                        fcst_fmters_final = {}
+                        id_cols = ["Référence Article", "Désignation Article"] # Colonnes texte
+                        for col in df_fcst_disp.columns:
+                            if col not in id_cols: # Formater toutes les autres comme nombres entiers
+                                fcst_fmters_final[col] = "{:,.0f}"
 
                         try: st.dataframe(df_fcst_disp.style.format(fcst_fmters_final, na_rep="-", thousands=","))
                         except Exception as e_fmt: st.error(f"Erreur formatage affichage: {e_fmt}"); st.dataframe(df_fcst_disp)
@@ -501,20 +506,24 @@ if 'df_initial_filtered' in st.session_state and st.session_state.df_initial_fil
 
                         # Export Forecast Results
                         st.markdown("#### Export Simulation"); out_f = io.BytesIO(); df_exp_f = df_fcst_disp.copy() # Exporter toutes les colonnes retournées
-
-                        # Ajouter total général pour l'export
+                        # Ajouter le total général en bas pour l'export
                         if not df_exp_f.empty:
-                             # Créer une ligne avec le total. Ajuster les colonnes si nécessaire.
-                             total_row_data = {'Référence Article': 'TOTAL GÉNÉRAL'} # Mettre le label dans une colonne texte
-                             # Calculer le total de la colonne 'Total Annuel' si elle existe
-                             if 'Total Annuel' in df_exp_f.columns:
-                                 total_row_data['Total Annuel'] = df_exp_f['Total Annuel'].sum()
-                             # Mettre des NaN ou vides pour les autres colonnes
-                             for col in df_exp_f.columns:
-                                 if col not in total_row_data: total_row_data[col] = np.nan
-                             total_row_fcst = pd.DataFrame([total_row_data])
-                             df_exp_f = pd.concat([df_exp_f, total_row_fcst], ignore_index=True)
-
+                             try:
+                                 # Créer une ligne avec le total.
+                                 total_row_data = {}
+                                 label_col_export = "Désignation Article" if "Désignation Article" in df_exp_f.columns else df_exp_f.columns[1] # Colonne pour le label 'TOTAL'
+                                 total_col_export = "Total Annuel" # Colonne pour la valeur numérique
+                                 for col in df_exp_f.columns: total_row_data[col] = '' # Initialiser avec vide ou NaN? Vide est mieux pour Excel.
+                                 total_row_data[label_col_export] = 'TOTAL GÉNÉRAL'
+                                 # Calculer la somme des qté annuelles (Total Annuel)
+                                 if total_col_export in df_exp_f.columns:
+                                     total_row_data[total_col_export] = df_exp_f[total_col_export].sum()
+                                 # Note: On n'ajoute pas le grand total montant ici, il est déjà affiché dans l'UI.
+                                 total_row_fcst = pd.DataFrame([total_row_data])
+                                 df_exp_f = pd.concat([df_exp_f, total_row_fcst], ignore_index=True)
+                             except Exception as e_total:
+                                  logging.error(f"Erreur lors de l'ajout de la ligne total à l'export forecast: {e_total}")
+                                  # Continuer sans la ligne total si erreur
 
                         try:
                             with pd.ExcelWriter(out_f, engine="openpyxl") as w_f: df_exp_f.to_excel(w_f, sheet_name=f"Forecast_{sim_t.replace(' ','_')}", index=False)
@@ -533,4 +542,4 @@ elif not uploaded_file:
          keys_to_clear.extend(dynamic_keys)
          for key in keys_to_clear:
              if key in st.session_state: del st.session_state[key]
-         st.rerun() # Use st.rerun()
+         st.rerun()
