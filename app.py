@@ -44,7 +44,7 @@ if uploaded_file and st.session_state.df_full is None:
         st.info("Lecture onglet 'Minimum de commande'...")
         df_min_commande_temp = safe_read_excel(file_buffer, sheet_name="Minimum de commande"); min_order_dict_temp = {}
         if df_min_commande_temp is not None:
-            st.success("✅ Onglet 'Minimum de commande' lu."); supplier_col_min = "Fournisseur"; min_amount_col = "Minimum Commande €"; required_min_cols = [supplier_col_min, min_amount_col]
+            st.success("✅ Onglet 'Minimum de commande' lu."); supplier_col_min = "Fournisseur"; min_amount_col = "Minimum de Commande"; required_min_cols = [supplier_col_min, min_amount_col]
             if all(col in df_min_commande_temp.columns for col in required_min_cols):
                 try: df_min_commande_temp[supplier_col_min] = df_min_commande_temp[supplier_col_min].astype(str).str.strip(); df_min_commande_temp[min_amount_col] = pd.to_numeric(df_min_commande_temp[min_amount_col], errors='coerce'); min_order_dict_temp = df_min_commande_temp.dropna(subset=[supplier_col_min, min_amount_col]).set_index(supplier_col_min)[min_amount_col].to_dict()
                 except Exception as e_min_proc: st.error(f"❌ Erreur traitement 'Min commande': {e_min_proc}")
