@@ -4,21 +4,17 @@ import numpy as np
 import io
 import logging
 import re
-import openpyxl
+import openpyxl # Utilisé indirectement par pd.ExcelWriter(engine='openpyxl')
 from openpyxl.utils import get_column_letter
+from openpyxl.styles import Font, PatternFill, Alignment # NEW: For Excel formatting
 import calendar
-import zipfile # NEW: Import zipfile
+import zipfile # For ZIP export
 
 # --- Logging Configuration ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-# --- Helper Functions (safe_read_excel, calculer_quantite_a_commander, etc. - UNCHANGED) ---
-# ... (gardez vos fonctions existantes ici, je ne les répète pas pour la concision) ...
-# Assurez-vous que vos fonctions `safe_read_excel`, `calculer_quantite_a_commander`,
-# `calculer_rotation_stock`, `approx_weeks_to_months`, `calculer_forecast_simulation_v3`,
-# `sanitize_sheet_name`, `render_supplier_checkboxes`, `sanitize_supplier_key` sont présentes.
+# --- Helper Functions ---
 
-# --- Helper Functions (EXISTING - UNCHANGED) ---
 def safe_read_excel(uploaded_file, sheet_name, **kwargs):
     """ Safely reads an Excel sheet, returning None if sheet not found or error occurs. """
     try:
@@ -59,6 +55,76 @@ def safe_read_excel(uploaded_file, sheet_name, **kwargs):
             st.error(f"❌ Erreur inattendue ('{type(e).__name__}') lors de la lecture de l'onglet '{sheet_name}': {e}.")
         return None
 
+# --- NEW: Excel Formatting Helper ---
+def format_excel_sheet(worksheet, df, column_formats={}, freeze_header=True, default_float_format="#,##0.00", default_int_format="#,##0", default_date_format="dd/mm/yyyy"):
+    """Applies formatting to an openpyxl worksheet based on a DataFrame."""
+    if df is None or df.empty:
+        logging.warning("Attempted to format sheet with empty or None DataFrame.")
+        return
+
+    header_font = Font(bold=True, color="FFFFFF")
+    header_fill = PatternFill(start_color="4F81BD", end_color="4F81BD", fill_type="solid")
+    header_alignment = Alignment(horizontal="center", vertical="center", wrap_text=True) # Wrap header text
+    data_alignment = Alignment(vertical="center") # Center data vertically
+
+    # Format Header
+    for cell in worksheet[1]:
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = header_alignment
+
+    # Format Data Rows and Adjust Column Widths
+    for idx, col_name in enumerate(df.columns):
+        col_letter = get_column_letter(idx + 1)
+        max_len = 0
+        number_format_to_apply = None # Reset for each column
+
+        # Column Width Calculation (Simplified for performance, adjust if needed)
+        try:
+            header_len = len(str(col_name))
+            # Sample a few rows for data length instead of full column max for speed
+            sampled_data = df[col_name].dropna().sample(min(len(df[col_name].dropna()), 50)) if not df[col_name].dropna().empty else pd.Series([])
+            data_len = sampled_data.astype(str).map(len).max() if not sampled_data.empty else 0
+            
+            max_len = max(header_len, data_len if pd.notna(data_len) else 0) + 3 # Buffer
+            max_len = min(max(max_len, 10), 50) # Min width 10, Max width 50
+            worksheet.column_dimensions[col_letter].width = max_len
+        except Exception as e:
+            logging.warning(f"Could not set width for column {col_name}: {e}")
+            worksheet.column_dimensions[col_letter].width = 15
+
+        # Determine Cell Format
+        specific_format = column_formats.get(col_name)
+        # Use inferred dtype from pandas if possible, otherwise check original df
+        # Be careful if df passed here was modified (e.g., string conversions)
+        try:
+            col_dtype = df[col_name].dtype
+        except KeyError:
+            logging.warning(f"Column '{col_name}' not found in DataFrame for formatting.")
+            continue # Skip formatting this column if it doesn't exist
+
+        if specific_format:
+            number_format_to_apply = specific_format
+        elif pd.api.types.is_integer_dtype(col_dtype):
+            number_format_to_apply = default_int_format
+        elif pd.api.types.is_float_dtype(col_dtype):
+            number_format_to_apply = default_float_format
+        elif pd.api.types.is_datetime64_any_dtype(col_dtype) or isinstance(df[col_name].iloc[0] if not df[col_name].empty else None, pd.Timestamp):
+             number_format_to_apply = default_date_format
+        # else: number_format_to_apply remains None for text/object types
+
+        # Apply Format and Alignment to Data Cells
+        for row_idx in range(2, worksheet.max_row + 1):
+            cell = worksheet[f"{col_letter}{row_idx}"]
+            cell.alignment = data_alignment # Apply vertical alignment
+            if number_format_to_apply and not str(cell.value).startswith('='): # Don't format formulas here
+                cell.number_format = number_format_to_apply
+
+    # Freeze Header Row
+    if freeze_header:
+        worksheet.freeze_panes = worksheet['A2']
+
+# --- Other Helper Functions (calculer_quantite_a_commander, etc. - UNCHANGED but ensure they exist) ---
 def calculer_quantite_a_commander(df, semaine_columns, montant_minimum_input, duree_semaines):
     """ Calcule la quantité à commander. """
     try:
@@ -596,7 +662,7 @@ if uploaded_file and st.session_state.df_full is None:
     for key in keys_to_reset:
         if key in st.session_state: del st.session_state[key]
     for prefix in dynamic_key_prefixes:
-        for k_to_remove in [k for k in st.session_state if k.startswith(prefix)]: del st.session_state[k_to_remove]
+        for k in [k for k in st.session_state if k.startswith(prefix)]: del st.session_state[k]
     for key, default_value in get_default_session_state().items(): st.session_state[key] = default_value
     logging.info("Session state reset for new file.")
 
@@ -611,8 +677,8 @@ if uploaded_file and st.session_state.df_full is None:
         df_full_temp["Tarif d'achat"]=pd.to_numeric(df_full_temp["Tarif d'achat"],errors='coerce').fillna(0)
         df_full_temp["Conditionnement"]=pd.to_numeric(df_full_temp["Conditionnement"],errors='coerce').fillna(1).apply(lambda x:int(x)if x>0 else 1)
         for str_col in ["Fournisseur","AF_RefFourniss","Référence Article","Désignation Article"]:
-            if str_col in df_full_temp.columns:df_full_temp[str_col]=df_full_temp[str_col].astype(str).str.strip()
-        st.session_state.df_full=df_full_temp;st.success("✅ 'Tableau final' lu.")
+            if str_col in df_full_temp.columns: df_full_temp[str_col]=df_full_temp[str_col].astype(str).str.strip()
+        st.session_state.df_full=df_full_temp; st.success("✅ 'Tableau final' lu.")
 
         st.info("Lecture 'Minimum de commande'...")
         excel_file_buffer.seek(0)
@@ -626,24 +692,24 @@ if uploaded_file and st.session_state.df_full is None:
                     df_min_cmd_temp[m_col]=pd.to_numeric(df_min_cmd_temp[m_col],errors='coerce')
                     min_order_dict_temp=df_min_cmd_temp.dropna(subset=[s_col,m_col]).set_index(s_col)[m_col].to_dict()
                     st.success(f"✅ 'Min commande' lu ({len(min_order_dict_temp)} entrées).")
-                except Exception as e_min:st.error(f"❌ Err trait. 'Min commande': {e_min}")
-            else:st.warning(f"⚠️ Cols '{s_col}'/'{m_col}' manquantes ('Min commande').")
+                except Exception as e_min: st.error(f"❌ Err trait. 'Min commande': {e_min}")
+            else: st.warning(f"⚠️ Cols '{s_col}'/'{m_col}' manquantes ('Min commande').")
         st.session_state.min_order_dict=min_order_dict_temp
 
         st.info("Lecture 'Suivi commandes'...")
         excel_file_buffer.seek(0)
-        df_suivi_temp=safe_read_excel(excel_file_buffer,sheet_name="Suivi commandes",header=4) # header=4 for line 5
+        df_suivi_temp=safe_read_excel(excel_file_buffer,sheet_name="Suivi commandes",header=4)
         if df_suivi_temp is not None:
-            required_suivi_cols=["Date Pièce BC","N° de pièce","AF_RefFourniss","Désignation Article","Qté Commandées","Intitulé Fournisseur"]
+            required_suivi_cols=["Date Pièce BC","N° de pièce","AF_RefFourniss","Désignation Article","Qté Commandées","Intitulé Fournisseur"] # Use exact name from Excel
             missing_suivi_cols_check=[col for col in required_suivi_cols if col not in df_suivi_temp.columns]
             if not missing_suivi_cols_check:
-                df_suivi_temp.rename(columns={"Intitulé Fournisseur":"Fournisseur"},inplace=True)
+                df_suivi_temp.rename(columns={"Intitulé Fournisseur":"Fournisseur"},inplace=True) # Rename for internal consistency
                 for col_strip in ["Fournisseur","AF_RefFourniss","Désignation Article","N° de pièce"]:
-                    if col_strip in df_suivi_temp.columns:df_suivi_temp[col_strip]=df_suivi_temp[col_strip].astype(str).str.strip()
-                if "Qté Commandées" in df_suivi_temp.columns:df_suivi_temp["Qté Commandées"]=pd.to_numeric(df_suivi_temp["Qté Commandées"],errors='coerce').fillna(0)
+                    if col_strip in df_suivi_temp.columns: df_suivi_temp[col_strip]=df_suivi_temp[col_strip].astype(str).str.strip()
+                if "Qté Commandées" in df_suivi_temp.columns: df_suivi_temp["Qté Commandées"]=pd.to_numeric(df_suivi_temp["Qté Commandées"],errors='coerce').fillna(0)
                 if "Date Pièce BC" in df_suivi_temp.columns:
-                    try:df_suivi_temp["Date Pièce BC"]=pd.to_datetime(df_suivi_temp["Date Pièce BC"],errors='coerce')
-                    except Exception as e_dt:st.warning(f"⚠️ Problème parsing 'Date Pièce BC': {e_dt}.")
+                    try: df_suivi_temp["Date Pièce BC"]=pd.to_datetime(df_suivi_temp["Date Pièce BC"],errors='coerce')
+                    except Exception as e_dt: st.warning(f"⚠️ Problème parsing 'Date Pièce BC': {e_dt}.")
                 df_suivi_temp.dropna(how='all',inplace=True)
                 st.session_state.df_suivi_commandes=df_suivi_temp
                 st.success(f"✅ 'Suivi commandes' lu ({len(df_suivi_temp)} lignes).")
@@ -657,21 +723,21 @@ if uploaded_file and st.session_state.df_full is None:
         df_loaded_ff=st.session_state.df_full
         df_init_filtered_temp=df_loaded_ff[(df_loaded_ff["Fournisseur"].notna())&(df_loaded_ff["Fournisseur"]!="")&(df_loaded_ff["Fournisseur"]!="#FILTER")&(df_loaded_ff["AF_RefFourniss"].notna())&(df_loaded_ff["AF_RefFourniss"]!="")].copy()
         st.session_state.df_initial_filtered=df_init_filtered_temp
-        f_w_c_idx=12;pot_sales_cols=[]
+        f_w_c_idx=12; pot_sales_cols=[]
         if len(df_loaded_ff.columns)>f_w_c_idx:
             cand_cols_s=df_loaded_ff.columns[f_w_c_idx:].tolist()
             known_non_w_cols=["Tarif d'achat","Conditionnement","Stock","Total","Stock à terme","Ventes N-1","Ventes 12 semaines identiques N-1","Ventes 12 dernières semaines","Quantité à commander","Fournisseur","AF_RefFourniss","Référence Article","Désignation Article"]
             excl_set=set(known_non_w_cols)
             for col_c in cand_cols_s:
-                if col_c not in excl_set and pd.api.types.is_numeric_dtype(df_loaded_ff.get(col_c,pd.Series(dtype=object)).dtype):pot_sales_cols.append(col_c)
+                if col_c not in excl_set and pd.api.types.is_numeric_dtype(df_loaded_ff.get(col_c,pd.Series(dtype=object)).dtype): pot_sales_cols.append(col_c)
         st.session_state.all_available_semaine_columns=pot_sales_cols
-        if not pot_sales_cols:st.warning("⚠️ Aucune colonne vente numérique identifiée.")
-        if not df_init_filtered_temp.empty:st.session_state.unique_suppliers_list=sorted(df_init_filtered_temp["Fournisseur"].astype(str).unique().tolist())
+        if not pot_sales_cols: st.warning("⚠️ Aucune colonne vente numérique identifiée.")
+        if not df_init_filtered_temp.empty: st.session_state.unique_suppliers_list=sorted(df_init_filtered_temp["Fournisseur"].astype(str).unique().tolist())
         st.rerun()
     except Exception as e_load_main:
         st.error(f"❌ Erreur majeure chargement/traitement: {e_load_main}")
         logging.exception("Major file loading/processing error:")
-        st.session_state.df_full=None;st.stop()
+        st.session_state.df_full=None; st.stop()
 
 if 'df_initial_filtered' in st.session_state and isinstance(st.session_state.df_initial_filtered, pd.DataFrame):
     df_base_for_tabs=st.session_state.df_initial_filtered
@@ -683,7 +749,7 @@ if 'df_initial_filtered' in st.session_state and isinstance(st.session_state.df_
     tab_titles=["Prévision Commande","Analyse Rotation Stock","Vérification Stock","Simulation Forecast","Suivi Commandes Fourn."]
     tab1,tab2,tab3,tab4,tab5=st.tabs(tab_titles)
 
-    with tab1:
+    with tab1: # Prévision Commande
         st.header("Prévision des Quantités à Commander")
         selected_fournisseurs_tab1=render_supplier_checkboxes("tab1",all_suppliers_from_data,default_select_all=True)
         df_display_tab1=pd.DataFrame()
@@ -691,82 +757,88 @@ if 'df_initial_filtered' in st.session_state and isinstance(st.session_state.df_
             if not df_base_for_tabs.empty:
                 df_display_tab1=df_base_for_tabs[df_base_for_tabs["Fournisseur"].isin(selected_fournisseurs_tab1)].copy()
                 st.caption(f"{len(df_display_tab1)} art. / {len(selected_fournisseurs_tab1)} fourn.")
-        else:st.info("Sélectionner fournisseur(s).")
+        else: st.info("Sélectionner fournisseur(s).")
         st.markdown("---")
-        if df_display_tab1.empty and selected_fournisseurs_tab1:st.warning("Aucun article pour fournisseur(s) sélectionné(s).")
-        elif not identified_semaine_cols and not df_display_tab1.empty:st.warning("Colonnes ventes non identifiées.")
+        if df_display_tab1.empty and selected_fournisseurs_tab1: st.warning("Aucun article pour fournisseur(s) sélectionné(s).")
+        elif not identified_semaine_cols and not df_display_tab1.empty: st.warning("Colonnes ventes non identifiées.")
         elif not df_display_tab1.empty:
             st.markdown("#### Paramètres Calcul Commande")
             col1_cmd,col2_cmd=st.columns(2)
-            with col1_cmd:d_s_c=st.number_input("⏳ Couverture (sem.)",1,260,4,1,key="d_s_c_t1") # Shortened
-            with col2_cmd:m_m_c=st.number_input("💶 Montant min (€)",0.0,value=0.0,step=50.0,format="%.2f",key="m_m_c_t1") # Shortened
-            if st.button("🚀 Calculer Qtés Cmd",key="calc_q_c_b_t1"): # Shortened
-                with st.spinner("Calcul qtés..."):res_c=calculer_quantite_a_commander(df_display_tab1,identified_semaine_cols,m_m_c,d_s_c) # Shortened
+            with col1_cmd: d_s_c=st.number_input("⏳ Couverture (sem.)",1,260,4,1,key="d_s_c_t1")
+            with col2_cmd: m_m_c=st.number_input("💶 Montant min (€)",0.0,value=0.0,step=50.0,format="%.2f",key="m_m_c_t1")
+            if st.button("🚀 Calculer Qtés Cmd",key="calc_q_c_b_t1"):
+                with st.spinner("Calcul qtés..."): res_c=calculer_quantite_a_commander(df_display_tab1,identified_semaine_cols,m_m_c,d_s_c)
                 if res_c:
-                    st.success("✅ Calcul qtés OK.");q_c,vN1,v12N1,v12l,m_c=res_c # Shortened
-                    df_r_c=df_display_tab1.copy();df_r_c["Qte Cmdée"]=q_c # Shortened
-                    df_r_c["Vts N-1 Total (calc)"]=vN1;df_r_c["Vts 12 N-1 Sim (calc)"]=v12N1;df_r_c["Vts 12 Dern. (calc)"]=v12l
+                    st.success("✅ Calcul qtés OK."); q_c,vN1,v12N1,v12l,m_c=res_c
+                    df_r_c=df_display_tab1.copy(); df_r_c["Qte Cmdée"]=q_c
+                    df_r_c["Vts N-1 Total (calc)"]=vN1; df_r_c["Vts 12 N-1 Sim (calc)"]=v12N1; df_r_c["Vts 12 Dern. (calc)"]=v12l
                     df_r_c["Tarif Ach."]=pd.to_numeric(df_r_c["Tarif d'achat"],errors='coerce').fillna(0)
                     df_r_c["Total Cmd (€)"]=df_r_c["Tarif Ach."]*df_r_c["Qte Cmdée"]
                     df_r_c["Stock Terme"]=df_r_c["Stock"]+df_r_c["Qte Cmdée"]
-                    st.session_state.commande_result_df=df_r_c;st.session_state.commande_calculated_total_amount=m_c
-                    st.session_state.commande_suppliers_calculated_for=selected_fournisseurs_tab1;st.rerun()
-                else:st.error("❌ Calcul qtés échoué.")
+                    st.session_state.commande_result_df=df_r_c; st.session_state.commande_calculated_total_amount=m_c
+                    st.session_state.commande_suppliers_calculated_for=selected_fournisseurs_tab1; st.rerun()
+                else: st.error("❌ Calcul qtés échoué.")
             if st.session_state.commande_result_df is not None and st.session_state.commande_suppliers_calculated_for==selected_fournisseurs_tab1:
-                st.markdown("---");st.markdown("#### Résultats Prévision Commande")
-                df_c_d=st.session_state.commande_result_df;m_c_d=st.session_state.commande_calculated_total_amount;s_c_d=st.session_state.commande_suppliers_calculated_for # Shortened
+                st.markdown("---"); st.markdown("#### Résultats Prévision Commande")
+                df_c_d=st.session_state.commande_result_df; m_c_d=st.session_state.commande_calculated_total_amount; s_c_d=st.session_state.commande_suppliers_calculated_for
                 st.metric(label="💰 Montant Total Cmd",value=f"{m_c_d:,.2f} €")
                 if len(s_c_d)==1:
-                    s_s=s_c_d[0] # Shortened
+                    s_s=s_c_d[0]
                     if s_s in min_order_amounts:
-                        r_m_s=min_order_amounts[s_s];a_t_s=df_c_d[df_c_d["Fournisseur"]==s_s]["Total Cmd (€)"].sum() # Shortened
-                        if r_m_s>0 and a_t_s<r_m_s:st.warning(f"⚠️ Min non atteint ({s_s}): {a_t_s:,.2f}€ / Requis: {r_m_s:,.2f}€ (Manque: {r_m_s-a_t_s:,.2f}€)")
-                cols_s_c=["Fournisseur","AF_RefFourniss","Référence Article","Désignation Article","Stock","Vts N-1 Total (calc)","Vts 12 N-1 Sim (calc)","Vts 12 Dern. (calc)","Conditionnement","Qte Cmdée","Stock Terme","Tarif Ach.","Total Cmd (€)"] # Shortened
-                disp_c_c=[c for c in cols_s_c if c in df_c_d.columns] # Shortened
-                if not disp_c_c:st.error("Aucune col à afficher (cmd).")
+                        r_m_s=min_order_amounts[s_s]; a_t_s=df_c_d[df_c_d["Fournisseur"]==s_s]["Total Cmd (€)"].sum()
+                        if r_m_s>0 and a_t_s<r_m_s: st.warning(f"⚠️ Min non atteint ({s_s}): {a_t_s:,.2f}€ / Requis: {r_m_s:,.2f}€ (Manque: {r_m_s-a_t_s:,.2f}€)")
+                cols_s_c=["Fournisseur","AF_RefFourniss","Référence Article","Désignation Article","Stock","Vts N-1 Total (calc)","Vts 12 N-1 Sim (calc)","Vts 12 Dern. (calc)","Conditionnement","Qte Cmdée","Stock Terme","Tarif Ach.","Total Cmd (€)"]
+                disp_c_c=[c for c in cols_s_c if c in df_c_d.columns]
+                if not disp_c_c: st.error("Aucune col à afficher (cmd).")
                 else:
-                    fmts_c={"Tarif Ach.":"{:,.2f}€","Total Cmd (€)":"{:,.2f}€","Vts N-1 Total (calc)":"{:,.0f}","Vts 12 N-1 Sim (calc)":"{:,.0f}","Vts 12 Dern. (calc)":"{:,.0f}","Stock":"{:,.0f}","Conditionnement":"{:,.0f}","Qte Cmdée":"{:,.0f}","Stock Terme":"{:,.0f}"} # Shortened
+                    fmts_c={"Tarif Ach.":"{:,.2f}€","Total Cmd (€)":"{:,.2f}€","Vts N-1 Total (calc)":"{:,.0f}","Vts 12 N-1 Sim (calc)":"{:,.0f}","Vts 12 Dern. (calc)":"{:,.0f}","Stock":"{:,.0f}","Conditionnement":"{:,.0f}","Qte Cmdée":"{:,.0f}","Stock Terme":"{:,.0f}"}
                     st.dataframe(df_c_d[disp_c_c].style.format(fmts_c,na_rep="-",thousands=","))
                 st.markdown("#### Export Commandes")
-                df_e_c=df_c_d[df_c_d["Qte Cmdée"]>0].copy() # Shortened
+                df_e_c=df_c_d[df_c_d["Qte Cmdée"]>0].copy()
                 if not df_e_c.empty:
-                    out_b_c=io.BytesIO();shts_c=0 # Shortened
+                    out_b_c=io.BytesIO(); shts_c=0
                     try:
-                        with pd.ExcelWriter(out_b_c,engine="openpyxl") as writer_c: # Shortened
-                            exp_c_s_c=[c for c in disp_c_c if c!='Fournisseur'] # Shortened
-                            q,p,t="Qte Cmdée","Tarif Ach.","Total Cmd (€)" # Shortened
+                        with pd.ExcelWriter(out_b_c,engine="openpyxl") as writer_c:
+                            exp_c_s_c=[c for c in disp_c_c if c!='Fournisseur']
+                            q,p,t="Qte Cmdée","Tarif Ach.","Total Cmd (€)"
                             f_ok=False
                             if all(c in exp_c_s_c for c in [q,p,t]):
-                                try:q_l,p_l,t_l=get_column_letter(exp_c_s_c.index(q)+1),get_column_letter(exp_c_s_c.index(p)+1),get_column_letter(exp_c_s_c.index(t)+1);f_ok=True
-                                except ValueError:pass
-                            for sup_e in s_c_d: # Shortened
-                                df_s_e=df_e_c[df_e_c["Fournisseur"]==sup_e] # Shortened
+                                try: q_l,p_l,t_l=get_column_letter(exp_c_s_c.index(q)+1),get_column_letter(exp_c_s_c.index(p)+1),get_column_letter(exp_c_s_c.index(t)+1); f_ok=True
+                                except ValueError: pass
+                            for sup_e in s_c_d:
+                                df_s_e=df_e_c[df_e_c["Fournisseur"]==sup_e]
                                 if not df_s_e.empty:
-                                    df_w_s=df_s_e[exp_c_s_c].copy() # Shortened
+                                    df_w_s=df_s_e[exp_c_s_c].copy() # DataFrame with data only
+                                    df_to_format = df_w_s.copy() # Copy for formatting before adding totals
                                     n_r=len(df_w_s)
-                                    lbl_c_s="Désignation Article" if "Désignation Article" in exp_c_s_c else(exp_c_s_c[1]if len(exp_c_s_c)>1 else exp_c_s_c[0]) # Shortened
-                                    tot_v_s=df_w_s[t].sum();min_r_s=min_order_amounts.get(sup_e,0);min_d_s=f"{min_r_s:,.2f}€"if min_r_s>0 else"N/A"
+                                    lbl_c_s="Désignation Article" if "Désignation Article" in exp_c_s_c else(exp_c_s_c[1]if len(exp_c_s_c)>1 else exp_c_s_c[0])
+                                    tot_v_s=df_w_s[t].sum(); min_r_s=min_order_amounts.get(sup_e,0); min_d_s=f"{min_r_s:,.2f}€"if min_r_s>0 else"N/A"
                                     sum_r=pd.DataFrame([{lbl_c_s:"TOTAL",t:tot_v_s},{lbl_c_s:"Min Requis Fourn.",t:min_d_s}],columns=exp_c_s_c).fillna('')
-                                    df_fin_s=pd.concat([df_w_s,sum_r],ignore_index=True)
+                                    df_fin_s=pd.concat([df_w_s,sum_r],ignore_index=True) # DataFrame with total rows
                                     s_nm=sanitize_sheet_name(sup_e)
                                     try:
                                         df_fin_s.to_excel(writer_c,sheet_name=s_nm,index=False)
                                         ws=writer_c.sheets[s_nm]
+                                        # Define formats for this sheet
+                                        cmd_col_fmts = {"Stock":"#,##0","Vts N-1 Total (calc)":"#,##0","Vts 12 N-1 Sim (calc)":"#,##0","Vts 12 Dern. (calc)":"#,##0","Conditionnement":"#,##0","Qte Cmdée":"#,##0","Stock Terme":"#,##0","Tarif Ach.":"#,##0.00€"}
+                                        # Format based on data before totals were added
+                                        format_excel_sheet(ws, df_to_format, column_formats=cmd_col_fmts)
                                         if f_ok and n_r>0:
-                                            for r_idx in range(2,n_r+2):ws[f"{t_l}{r_idx}"].value=f"={q_l}{r_idx}*{p_l}{r_idx}";ws[f"{t_l}{r_idx}"].number_format='#,##0.00€'
-                                            ws[f"{t_l}{n_r+2}"].value=f"=SUM({t_l}2:{t_l}{n_r+1})";ws[f"{t_l}{n_r+2}"].number_format='#,##0.00€'
+                                            for r_idx in range(2,n_r+2): ws[f"{t_l}{r_idx}"].value=f"={q_l}{r_idx}*{p_l}{r_idx}"; ws[f"{t_l}{r_idx}"].number_format='#,##0.00€' # Apply formula format
+                                            ws[f"{t_l}{n_r+2}"].value=f"=SUM({t_l}2:{t_l}{n_r+1})"; ws[f"{t_l}{n_r+2}"].number_format='#,##0.00€'
+                                            ws[f"{get_column_letter(exp_c_s_c.index(lbl_c_s) + 1)}{n_r + 2}"].font = Font(bold=True) # Bold TOTAL label
                                         shts_c+=1
-                                    except Exception as e_sht:logging.error(f"Err export sheet {s_nm}: {e_sht}")
+                                    except Exception as e_sht: logging.error(f"Err export sheet {s_nm}: {e_sht}")
                         if shts_c>0:
-                            writer_c.save();out_b_c.seek(0)
-                            fn_c=f"commandes_{'multi'if len(s_c_d)>1 else sanitize_sheet_name(s_c_d[0])}_{pd.Timestamp.now():%Y%m%d_%H%M}.xlsx" # Shortened
-                            st.download_button(f"📥 Télécharger ({shts_c} feuilles)",out_b_c,fn_c,"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",key="dl_c_b_t1_dl") # Shortened
-                        else:st.info("Aucune qté > 0 à exporter.")
-                    except Exception as e_wrt_c:logging.exception(f"Err ExcelWriter cmd: {e_wrt_c}");st.error("Erreur export commandes.") # Shortened
-                else:st.info("Aucun article qté > 0 à exporter.")
-            else:st.info("Résultats commande invalidés. Relancer.")
+                            writer_c.save(); out_b_c.seek(0)
+                            fn_c=f"commandes_{'multi'if len(s_c_d)>1 else sanitize_sheet_name(s_c_d[0])}_{pd.Timestamp.now():%Y%m%d_%H%M}.xlsx"
+                            st.download_button(f"📥 Télécharger ({shts_c} feuilles)",out_b_c,fn_c,"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",key="dl_c_b_t1_dl")
+                        else: st.info("Aucune qté > 0 à exporter.")
+                    except Exception as e_wrt_c: logging.exception(f"Err ExcelWriter cmd: {e_wrt_c}"); st.error("Erreur export commandes.")
+                else: st.info("Aucun article qté > 0 à exporter.")
+            else: st.info("Résultats commande invalidés. Relancer.")
 
-    with tab2:
+    with tab2: # Analyse Rotation Stock
         st.header("Analyse de la Rotation des Stocks")
         selected_fournisseurs_tab2=render_supplier_checkboxes("tab2",all_suppliers_from_data,default_select_all=True)
         df_display_tab2=pd.DataFrame()
@@ -774,91 +846,114 @@ if 'df_initial_filtered' in st.session_state and isinstance(st.session_state.df_
             if not df_base_for_tabs.empty:
                 df_display_tab2=df_base_for_tabs[df_base_for_tabs["Fournisseur"].isin(selected_fournisseurs_tab2)].copy()
                 st.caption(f"{len(df_display_tab2)} art. / {len(selected_fournisseurs_tab2)} fourn.")
-        else:st.info("Sélectionner fournisseur(s).")
+        else: st.info("Sélectionner fournisseur(s).")
         st.markdown("---")
-        if df_display_tab2.empty and selected_fournisseurs_tab2:st.warning("Aucun article pour fournisseur(s) sélectionné(s).")
-        elif not identified_semaine_cols and not df_display_tab2.empty:st.warning("Colonnes ventes non identifiées.")
+        if df_display_tab2.empty and selected_fournisseurs_tab2: st.warning("Aucun article pour fournisseur(s) sélectionné(s).")
+        elif not identified_semaine_cols and not df_display_tab2.empty: st.warning("Colonnes ventes non identifiées.")
         elif not df_display_tab2.empty:
             st.markdown("#### Paramètres Analyse Rotation")
-            col1_r,col2_r=st.columns(2) # Shortened
+            col1_r,col2_r=st.columns(2)
             with col1_r:
-                p_opts_r={"12 dern. sem.":12,"52 dern. sem.":52,"Total dispo.":0} # Shortened
-                sel_p_lbl_r=st.selectbox("⏳ Période analyse:",p_opts_r.keys(),key="r_p_sel_ui_t2") # Shortened
-                sel_p_w_r=p_opts_r[sel_p_lbl_r] # Shortened
+                p_opts_r={"12 dern. sem.":12,"52 dern. sem.":52,"Total dispo.":0}
+                sel_p_lbl_r=st.selectbox("⏳ Période analyse:",p_opts_r.keys(),key="r_p_sel_ui_t2")
+                sel_p_w_r=p_opts_r[sel_p_lbl_r]
             with col2_r:
                 st.markdown("##### Options Affichage")
-                show_all_r=st.checkbox("Afficher tout",value=st.session_state.show_all_rotation_data,key="show_all_r_ui_cb_t2") # Shortened
+                show_all_r=st.checkbox("Afficher tout",value=st.session_state.show_all_rotation_data,key="show_all_r_ui_cb_t2")
                 st.session_state.show_all_rotation_data=show_all_r
-                r_thr_ui=st.number_input("... ou vts mens. <",0.0,value=st.session_state.rotation_threshold_value,step=0.1,format="%.1f",key="r_thr_ui_numin_t2",disabled=show_all_r) # Shortened
-                if not show_all_r:st.session_state.rotation_threshold_value=r_thr_ui
-            if st.button("🔄 Analyser Rotation",key="analyze_r_btn_t2"): # Shortened
-                with st.spinner("Analyse rotation..."):df_r_res=calculer_rotation_stock(df_display_tab2,identified_semaine_cols,sel_p_w_r) # Shortened
+                r_thr_ui=st.number_input("... ou vts mens. <",0.0,value=st.session_state.rotation_threshold_value,step=0.1,format="%.1f",key="r_thr_ui_numin_t2",disabled=show_all_r)
+                if not show_all_r: st.session_state.rotation_threshold_value=r_thr_ui
+            if st.button("🔄 Analyser Rotation",key="analyze_r_btn_t2"):
+                with st.spinner("Analyse rotation..."): df_r_res=calculer_rotation_stock(df_display_tab2,identified_semaine_cols,sel_p_w_r)
                 if df_r_res is not None:
-                    st.success("✅ Analyse rotation OK.");st.session_state.rotation_result_df=df_r_res
-                    st.session_state.rotation_analysis_period_label=sel_p_lbl_r;st.session_state.rotation_suppliers_calculated_for=selected_fournisseurs_tab2
+                    st.success("✅ Analyse rotation OK."); st.session_state.rotation_result_df=df_r_res
+                    st.session_state.rotation_analysis_period_label=sel_p_lbl_r; st.session_state.rotation_suppliers_calculated_for=selected_fournisseurs_tab2
                     st.rerun()
-                else:st.error("❌ Analyse rotation échouée.")
+                else: st.error("❌ Analyse rotation échouée.")
             if st.session_state.rotation_result_df is not None and st.session_state.rotation_suppliers_calculated_for==selected_fournisseurs_tab2:
-                st.markdown("---");st.markdown(f"#### Résultats Rotation ({st.session_state.rotation_analysis_period_label})")
-                df_r_orig=st.session_state.rotation_result_df;thr_d_r=st.session_state.rotation_threshold_value;show_all_f_r=st.session_state.show_all_rotation_data # Shortened
-                m_sales_c_r="Ventes Moy Mensuel (Période)";df_r_disp=pd.DataFrame() # Shortened
-                if df_r_orig.empty:st.info("Aucune donnée rotation à afficher.")
-                elif show_all_f_r:df_r_disp=df_r_orig.copy();st.caption(f"Affichage {len(df_r_disp)} articles.")
+                st.markdown("---"); st.markdown(f"#### Résultats Rotation ({st.session_state.rotation_analysis_period_label})")
+                df_r_orig=st.session_state.rotation_result_df; thr_d_r=st.session_state.rotation_threshold_value; show_all_f_r=st.session_state.show_all_rotation_data
+                m_sales_c_r="Ventes Moy Mensuel (Période)"; df_r_disp=pd.DataFrame()
+                df_r_to_format = pd.DataFrame() # Keep original types for formatting
+
+                if df_r_orig.empty: st.info("Aucune donnée rotation à afficher.")
+                elif show_all_f_r: df_r_disp=df_r_orig.copy(); df_r_to_format = df_r_disp.copy(); st.caption(f"Affichage {len(df_r_disp)} articles.")
                 elif m_sales_c_r in df_r_orig.columns:
                     try:
-                        sales_f=pd.to_numeric(df_r_orig[m_sales_c_r],errors='coerce').fillna(0) # Shortened
+                        sales_f=pd.to_numeric(df_r_orig[m_sales_c_r],errors='coerce').fillna(0)
                         df_r_disp=df_r_orig[sales_f<thr_d_r].copy()
+                        df_r_to_format = df_r_disp.copy() # Keep original types for formatting
                         st.caption(f"Filtre: Vts < {thr_d_r:.1f}/mois. {len(df_r_disp)} / {len(df_r_orig)} art.")
-                        if df_r_disp.empty:st.info(f"Aucun article < {thr_d_r:.1f} vts/mois.")
-                    except Exception as ef_r:st.error(f"Err filtre: {ef_r}");df_r_disp=df_r_orig.copy() # Shortened
-                else:st.warning(f"Col '{m_sales_c_r}' non trouvée. Affichage tout.");df_r_disp=df_r_orig.copy()
-                if not df_r_disp.empty:
-                    cols_r_s=["Fournisseur","AF_RefFourniss","Référence Article","Désignation Article","Tarif d'achat","Stock","Unités Vendues (Période)","Ventes Moy Hebdo (Période)","Ventes Moy Mensuel (Période)","Semaines Stock (WoS)","Rotation Unités (Proxy)","Valeur Stock Actuel (€)","COGS (Période)","Rotation Valeur (Proxy)"] # Shortened
-                    disp_c_r=[c for c in cols_r_s if c in df_r_disp.columns] # Shortened
-                    df_d_cp_r=df_r_disp[disp_c_r].copy() # Shortened
-                    num_rnd_r={"Tarif d'achat":2,"Ventes Moy Hebdo (Période)":2,"Ventes Moy Mensuel (Période)":2,"Semaines Stock (WoS)":1,"Rotation Unités (Proxy)":2,"Valeur Stock Actuel (€)":2,"COGS (Période)":2,"Rotation Valeur (Proxy)":2} # Shortened
-                    for c,d in num_rnd_r.items():
-                        if c in df_d_cp_r.columns:df_d_cp_r[c]=pd.to_numeric(df_d_cp_r[c],errors='coerce').round(d)
-                    df_d_cp_r.replace([np.inf,-np.inf],'Infini',inplace=True)
-                    fmts_r={"Tarif d'achat":"{:,.2f}€","Stock":"{:,.0f}","Unités Vendues (Période)":"{:,.0f}","Ventes Moy Hebdo (Période)":"{:,.2f}","Ventes Moy Mensuel (Période)":"{:,.2f}","Semaines Stock (WoS)":"{}","Rotation Unités (Proxy)":"{}","Valeur Stock Actuel (€)":"{:,.2f}€","COGS (Période)":"{:,.2f}€","Rotation Valeur (Proxy)":"{}"} # Shortened
-                    st.dataframe(df_d_cp_r.style.format(fmts_r,na_rep="-",thousands=","))
-                    st.markdown("#### Export Analyse Affichée")
-                    out_b_r=io.BytesIO();df_e_r=df_d_cp_r # Shortened
-                    lbl_e_r=f"Filtree_{thr_d_r:.1f}"if not show_all_f_r else"Complete";sh_nm_r=sanitize_sheet_name(f"Rotation_{lbl_e_r}");f_base_r=f"analyse_rotation_{lbl_e_r}" # Shortened
-                    sup_e_nm_r='multi'if len(selected_fournisseurs_tab2)>1 else(sanitize_sheet_name(selected_fournisseurs_tab2[0])if selected_fournisseurs_tab2 else'NA') # Shortened
-                    with pd.ExcelWriter(out_b_r,engine="openpyxl")as wr_r:df_e_r.to_excel(wr_r,sheet_name=sh_nm_r,index=False) # Shortened
-                    out_b_r.seek(0);f_r_exp=f"{f_base_r}_{sup_e_nm_r}_{pd.Timestamp.now():%Y%m%d_%H%M}.xlsx" # Shortened
-                    dl_lbl_r=f"📥 Télécharger ({'Filtrée'if not show_all_f_r else'Complète'})" # Shortened
-                    st.download_button(dl_lbl_r,out_b_r,f_r_exp,"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",key="dl_r_b_t2_dl") # Shortened
-            else:st.info("Résultats analyse invalidés. Relancer.")
+                        if df_r_disp.empty: st.info(f"Aucun article < {thr_d_r:.1f} vts/mois.")
+                    except Exception as ef_r: st.error(f"Err filtre: {ef_r}"); df_r_disp=df_r_orig.copy(); df_r_to_format = df_r_disp.copy()
+                else: st.warning(f"Col '{m_sales_c_r}' non trouvée. Affichage tout."); df_r_disp=df_r_orig.copy(); df_r_to_format = df_r_disp.copy()
 
-    with tab3:
+                if not df_r_disp.empty:
+                    cols_r_s=["Fournisseur","AF_RefFourniss","Référence Article","Désignation Article","Tarif d'achat","Stock","Unités Vendues (Période)","Ventes Moy Hebdo (Période)","Ventes Moy Mensuel (Période)","Semaines Stock (WoS)","Rotation Unités (Proxy)","Valeur Stock Actuel (€)","COGS (Période)","Rotation Valeur (Proxy)"]
+                    disp_c_r=[c for c in cols_r_s if c in df_r_disp.columns]
+                    df_d_cp_r=df_r_disp[disp_c_r].copy() # For display with string formatting
+                    num_rnd_r={"Tarif d'achat":2,"Ventes Moy Hebdo (Période)":2,"Ventes Moy Mensuel (Période)":2,"Semaines Stock (WoS)":1,"Rotation Unités (Proxy)":2,"Valeur Stock Actuel (€)":2,"COGS (Période)":2,"Rotation Valeur (Proxy)":2}
+                    for c,d in num_rnd_r.items():
+                        if c in df_d_cp_r.columns: df_d_cp_r[c]=pd.to_numeric(df_d_cp_r[c],errors='coerce').round(d)
+                    df_d_cp_r.replace([np.inf,-np.inf],'Infini',inplace=True) # Format inf for display
+                    fmts_r={"Tarif d'achat":"{:,.2f}€","Stock":"{:,.0f}","Unités Vendues (Période)":"{:,.0f}","Ventes Moy Hebdo (Période)":"{:,.2f}","Ventes Moy Mensuel (Période)":"{:,.2f}","Semaines Stock (WoS)":"{}","Rotation Unités (Proxy)":"{}","Valeur Stock Actuel (€)":"{:,.2f}€","COGS (Période)":"{:,.2f}€","Rotation Valeur (Proxy)":"{}"}
+                    st.dataframe(df_d_cp_r.style.format(fmts_r,na_rep="-",thousands=","))
+
+                    st.markdown("#### Export Analyse Affichée")
+                    # Use df_r_to_format (with original dtypes) for export formatting
+                    if not df_r_to_format.empty:
+                        out_b_r=io.BytesIO()
+                        df_e_r=df_r_to_format[disp_c_r].copy() # Use original types, ensure columns exist
+                        lbl_e_r=f"Filtree_{thr_d_r:.1f}"if not show_all_f_r else"Complete"; sh_nm_r=sanitize_sheet_name(f"Rotation_{lbl_e_r}"); f_base_r=f"analyse_rotation_{lbl_e_r}"
+                        sup_e_nm_r='multi'if len(selected_fournisseurs_tab2)>1 else(sanitize_sheet_name(selected_fournisseurs_tab2[0])if selected_fournisseurs_tab2 else'NA')
+                        try:
+                            with pd.ExcelWriter(out_b_r,engine="openpyxl")as wr_r:
+                                df_e_r.to_excel(wr_r,sheet_name=sh_nm_r,index=False)
+                                ws_r = wr_r.sheets[sh_nm_r]
+                                rot_col_fmts = {"Tarif d'achat":"#,##0.00€","Stock":"#,##0","Unités Vendues (Période)":"#,##0","Ventes Moy Hebdo (Période)":"#,##0.00","Ventes Moy Mensuel (Période)":"#,##0.00","Semaines Stock (WoS)":"0.0","Rotation Unités (Proxy)":"0.00","Valeur Stock Actuel (€)":"#,##0.00€","COGS (Période)":"#,##0.00€","Rotation Valeur (Proxy)":"0.00"}
+                                format_excel_sheet(ws_r, df_e_r, column_formats=rot_col_fmts) # Pass df with original types
+
+                            out_b_r.seek(0); f_r_exp=f"{f_base_r}_{sup_e_nm_r}_{pd.Timestamp.now():%Y%m%d_%H%M}.xlsx"
+                            dl_lbl_r=f"📥 Télécharger ({'Filtrée'if not show_all_f_r else'Complète'})"
+                            st.download_button(dl_lbl_r,out_b_r,f_r_exp,"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",key="dl_r_b_t2_dl")
+                        except Exception as e_wrt_r: logging.exception(f"Err ExcelWriter rot: {e_wrt_r}"); st.error("Erreur export rotation.")
+                    else:
+                         st.info("Aucune donnée à exporter (après filtrage éventuel).")
+            else: st.info("Résultats analyse invalidés. Relancer.")
+
+    with tab3: # Vérification Stock Négatif
         st.header("Vérification des Stocks Négatifs")
         st.caption("Analyse tous articles du 'Tableau final'.")
         df_full_neg=st.session_state.get('df_full',None)
-        if df_full_neg is None or not isinstance(df_full_neg,pd.DataFrame):st.warning("Données non chargées.")
-        elif df_full_neg.empty:st.info("'Tableau final' vide.")
+        if df_full_neg is None or not isinstance(df_full_neg,pd.DataFrame): st.warning("Données non chargées.")
+        elif df_full_neg.empty: st.info("'Tableau final' vide.")
         else:
             stock_c_neg="Stock"
-            if stock_c_neg not in df_full_neg.columns:st.error(f"Colonne '{stock_c_neg}' non trouvée.")
+            if stock_c_neg not in df_full_neg.columns: st.error(f"Colonne '{stock_c_neg}' non trouvée.")
             else:
                 df_neg_res=df_full_neg[df_full_neg[stock_c_neg]<0].copy()
-                if df_neg_res.empty:st.success("✅ Aucun stock négatif.")
+                if df_neg_res.empty: st.success("✅ Aucun stock négatif.")
                 else:
                     st.warning(f"⚠️ **{len(df_neg_res)} article(s) avec stock négatif !**")
                     cols_neg_show=["Fournisseur","AF_RefFourniss","Référence Article","Désignation Article","Stock"]
                     disp_cols_neg=[c for c in cols_neg_show if c in df_neg_res.columns]
-                    if not disp_cols_neg:st.error("Cols manquantes affichage négatifs.")
-                    else:st.dataframe(df_neg_res[disp_cols_neg].style.format({"Stock":"{:,.0f}"},na_rep="-").apply(lambda s:['background-color:#FADBD8'if s.name==stock_c_neg and val<0 else''for val in s],axis=0))
-                    st.markdown("---");st.markdown("#### Exporter Stocks Négatifs")
+                    if not disp_cols_neg: st.error("Cols manquantes affichage négatifs.")
+                    else: st.dataframe(df_neg_res[disp_cols_neg].style.format({"Stock":"{:,.0f}"},na_rep="-").apply(lambda s:['background-color:#FADBD8'if s.name==stock_c_neg and val<0 else''for val in s],axis=0))
+                    st.markdown("---"); st.markdown("#### Exporter Stocks Négatifs")
                     out_b_neg=io.BytesIO()
+                    df_exp_neg=df_neg_res[disp_cols_neg].copy() # Data to export
                     try:
-                        with pd.ExcelWriter(out_b_neg,engine="openpyxl")as w_neg:df_neg_res[disp_cols_neg].to_excel(w_neg,sheet_name="Stocks_Negatifs",index=False)
-                        out_b_neg.seek(0);f_neg_exp=f"stocks_negatifs_{pd.Timestamp.now():%Y%m%d_%H%M}.xlsx"
-                        st.download_button("📥 Télécharger Liste Négatifs",out_b_neg,f_neg_exp,"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",key="dl_neg_b_t3_dl") # Shortened
-                    except Exception as e_exp_neg:st.error(f"Err export neg: {e_exp_neg}")
+                        with pd.ExcelWriter(out_b_neg,engine="openpyxl")as w_neg:
+                            df_exp_neg.to_excel(w_neg,sheet_name="Stocks_Negatifs",index=False)
+                            ws_neg = w_neg.sheets["Stocks_Negatifs"]
+                            neg_col_fmts = {"Stock": "#,##0"}
+                            format_excel_sheet(ws_neg, df_exp_neg, column_formats=neg_col_fmts)
 
-    with tab4:
+                        out_b_neg.seek(0); f_neg_exp=f"stocks_negatifs_{pd.Timestamp.now():%Y%m%d_%H%M}.xlsx"
+                        st.download_button("📥 Télécharger Liste Négatifs",out_b_neg,f_neg_exp,"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",key="dl_neg_b_t3_dl")
+                    except Exception as e_exp_neg: st.error(f"Err export neg: {e_exp_neg}")
+
+    with tab4: # Simulation Forecast
         st.header("Simulation de Forecast Annuel")
         selected_fournisseurs_tab4=render_supplier_checkboxes("tab4",all_suppliers_from_data,default_select_all=True)
         df_display_tab4=pd.DataFrame()
@@ -866,65 +961,74 @@ if 'df_initial_filtered' in st.session_state and isinstance(st.session_state.df_
             if not df_base_for_tabs.empty:
                 df_display_tab4=df_base_for_tabs[df_base_for_tabs["Fournisseur"].isin(selected_fournisseurs_tab4)].copy()
                 st.caption(f"{len(df_display_tab4)} art. / {len(selected_fournisseurs_tab4)} fourn.")
-        else:st.info("Sélectionner fournisseur(s).")
-        st.markdown("---");st.warning("🚨 **Hypothèse:** Saisonnalité mensuelle approx. sur 52 sem. N-1.")
-        if df_display_tab4.empty and selected_fournisseurs_tab4:st.warning("Aucun article pour fournisseur(s) sélectionné(s).")
-        elif len(identified_semaine_cols)<52 and not df_display_tab4.empty:st.warning(f"Données histo. < 52 sem ({len(identified_semaine_cols)}). Simu N-1 impossible.") # Shortened
+        else: st.info("Sélectionner fournisseur(s).")
+        st.markdown("---"); st.warning("🚨 **Hypothèse:** Saisonnalité mensuelle approx. sur 52 sem. N-1.")
+        if df_display_tab4.empty and selected_fournisseurs_tab4: st.warning("Aucun article pour fournisseur(s) sélectionné(s).")
+        elif len(identified_semaine_cols)<52 and not df_display_tab4.empty: st.warning(f"Données histo. < 52 sem ({len(identified_semaine_cols)}). Simu N-1 impossible.")
         elif not df_display_tab4.empty:
             st.markdown("#### Paramètres Simulation Forecast")
-            all_cal_m=list(calendar.month_name)[1:] # Shortened
-            sel_m_f_ui=st.multiselect("📅 Mois simulation:",all_cal_m,default=st.session_state.forecast_selected_months_ui,key="f_m_sel_ui_t4") # Shortened
+            all_cal_m=list(calendar.month_name)[1:]
+            sel_m_f_ui=st.multiselect("📅 Mois simulation:",all_cal_m,default=st.session_state.forecast_selected_months_ui,key="f_m_sel_ui_t4")
             st.session_state.forecast_selected_months_ui=sel_m_f_ui
-            sim_t_opts_f=('Simple Progression','Objectif Montant') # Shortened
-            sim_t_f_ui=st.radio("⚙️ Type Simulation:",sim_t_opts_f,horizontal=True,index=st.session_state.forecast_sim_type_radio_index,key="f_sim_t_ui_t4") # Shortened
+            sim_t_opts_f=('Simple Progression','Objectif Montant')
+            sim_t_f_ui=st.radio("⚙️ Type Simulation:",sim_t_opts_f,horizontal=True,index=st.session_state.forecast_sim_type_radio_index,key="f_sim_t_ui_t4")
             st.session_state.forecast_sim_type_radio_index=sim_t_opts_f.index(sim_t_f_ui)
-            prog_pct_f,obj_mt_f=0.0,0.0 # Shortened
+            prog_pct_f,obj_mt_f=0.0,0.0
             col1_f,col2_f=st.columns(2)
             with col1_f:
-                if sim_t_f_ui=='Simple Progression':
-                    prog_pct_f=st.number_input("📈 Progression (%)",-100.0,value=st.session_state.forecast_progression_percentage_ui,step=0.5,format="%.1f",key="f_prog_pct_ui_t4") # Shortened
-                    st.session_state.forecast_progression_percentage_ui=prog_pct_f
+                if sim_t_f_ui=='Simple Progression': prog_pct_f=st.number_input("📈 Progression (%)",-100.0,value=st.session_state.forecast_progression_percentage_ui,step=0.5,format="%.1f",key="f_prog_pct_ui_t4"); st.session_state.forecast_progression_percentage_ui=prog_pct_f
             with col2_f:
-                if sim_t_f_ui=='Objectif Montant':
-                    obj_mt_f=st.number_input("🎯 Objectif (€) (mois sel.)",0.0,value=st.session_state.forecast_target_amount_ui,step=1000.0,format="%.2f",key="f_target_amt_ui_t4") # Shortened
-                    st.session_state.forecast_target_amount_ui=obj_mt_f
-            if st.button("▶️ Lancer Simulation Forecast",key="run_f_sim_btn_t4"): # Shortened
-                if not sel_m_f_ui:st.error("Sélectionner au moins un mois.")
+                if sim_t_f_ui=='Objectif Montant': obj_mt_f=st.number_input("🎯 Objectif (€) (mois sel.)",0.0,value=st.session_state.forecast_target_amount_ui,step=1000.0,format="%.2f",key="f_target_amt_ui_t4"); st.session_state.forecast_target_amount_ui=obj_mt_f
+            if st.button("▶️ Lancer Simulation Forecast",key="run_f_sim_btn_t4"):
+                if not sel_m_f_ui: st.error("Sélectionner au moins un mois.")
                 else:
-                    with st.spinner("Simulation forecast..."):df_f_res,gt_f=calculer_forecast_simulation_v3(df_display_tab4,identified_semaine_cols,sel_m_f_ui,sim_t_f_ui,prog_pct_f,obj_mt_f) # Shortened
+                    with st.spinner("Simulation forecast..."): df_f_res,gt_f=calculer_forecast_simulation_v3(df_display_tab4,identified_semaine_cols,sel_m_f_ui,sim_t_f_ui,prog_pct_f,obj_mt_f)
                     if df_f_res is not None:
-                        st.success("✅ Simu forecast OK.");st.session_state.forecast_result_df=df_f_res;st.session_state.forecast_grand_total_amount=gt_f # Shortened
+                        st.success("✅ Simu forecast OK."); st.session_state.forecast_result_df=df_f_res; st.session_state.forecast_grand_total_amount=gt_f
                         st.session_state.forecast_simulation_params_calculated_for={'suppliers':selected_fournisseurs_tab4,'months':sel_m_f_ui,'type':sim_t_f_ui,'prog_pct':prog_pct_f,'obj_amt':obj_mt_f}
                         st.rerun()
-                    else:st.error("❌ Simu forecast échouée.") # Shortened
+                    else: st.error("❌ Simu forecast échouée.")
             if st.session_state.forecast_result_df is not None:
-                curr_p_f_ui={'suppliers':selected_fournisseurs_tab4,'months':sel_m_f_ui,'type':sim_t_f_ui,'prog_pct':st.session_state.forecast_progression_percentage_ui if sim_t_f_ui=='Simple Progression'else 0.0,'obj_amt':st.session_state.forecast_target_amount_ui if sim_t_f_ui=='Objectif Montant'else 0.0} # Shortened
+                curr_p_f_ui={'suppliers':selected_fournisseurs_tab4,'months':sel_m_f_ui,'type':sim_t_f_ui,'prog_pct':st.session_state.forecast_progression_percentage_ui if sim_t_f_ui=='Simple Progression'else 0.0,'obj_amt':st.session_state.forecast_target_amount_ui if sim_t_f_ui=='Objectif Montant'else 0.0}
                 if st.session_state.forecast_simulation_params_calculated_for==curr_p_f_ui:
-                    st.markdown("---");st.markdown("#### Résultats Simulation Forecast")
-                    df_f_disp=st.session_state.forecast_result_df;gt_f_disp=st.session_state.forecast_grand_total_amount # Shortened
-                    if df_f_disp.empty:st.info("Aucun résultat simulation.")
+                    st.markdown("---"); st.markdown("#### Résultats Simulation Forecast")
+                    df_f_disp=st.session_state.forecast_result_df; gt_f_disp=st.session_state.forecast_grand_total_amount
+                    if df_f_disp.empty: st.info("Aucun résultat simulation.")
                     else:
-                        fmts_f={"Tarif d'achat":"{:,.2f}€","Conditionnement":"{:,.0f}"} # Shortened
+                        fmts_f={"Tarif d'achat":"{:,.2f}€","Conditionnement":"{:,.0f}"}
                         for m_disp in sel_m_f_ui:
-                            if f"Ventes N-1 {m_disp}"in df_f_disp.columns:fmts_f[f"Ventes N-1 {m_disp}"]=" {:,.0f}"
-                            if f"Qté Prév. {m_disp}"in df_f_disp.columns:fmts_f[f"Qté Prév. {m_disp}"]=" {:,.0f}"
-                            if f"Montant Prév. {m_disp} (€)"in df_f_disp.columns:fmts_f[f"Montant Prév. {m_disp} (€)"]=" {:,.2f}€"
-                        for col_n in["Vts N-1 Tot (Mois Sel.)","Qté Tot Prév (Mois Sel.)","Mnt Tot Prév (€) (Mois Sel.)"]: # Shortened
-                            if col_n in df_f_disp.columns:fmts_f[col_n]="{:,.0f}"if"Qté"in col_n or"Vts"in col_n else"{:,.2f}€"
-                        try:st.dataframe(df_f_disp.style.format(fmts_f,na_rep="-",thousands=","))
-                        except Exception as e_fmt_f:st.error(f"Err format affichage: {e_fmt_f}");st.dataframe(df_f_disp) # Shortened
+                            if f"Ventes N-1 {m_disp}"in df_f_disp.columns: fmts_f[f"Ventes N-1 {m_disp}"]=" {:,.0f}"
+                            if f"Qté Prév. {m_disp}"in df_f_disp.columns: fmts_f[f"Qté Prév. {m_disp}"]=" {:,.0f}"
+                            if f"Montant Prév. {m_disp} (€)"in df_f_disp.columns: fmts_f[f"Montant Prév. {m_disp} (€)"]=" {:,.2f}€"
+                        for col_n in["Vts N-1 Tot (Mois Sel.)","Qté Tot Prév (Mois Sel.)","Mnt Tot Prév (€) (Mois Sel.)"]:
+                            if col_n in df_f_disp.columns: fmts_f[col_n]="{:,.0f}"if"Qté"in col_n or"Vts"in col_n else"{:,.2f}€"
+                        try: st.dataframe(df_f_disp.style.format(fmts_f,na_rep="-",thousands=","))
+                        except Exception as e_fmt_f: st.error(f"Err format affichage: {e_fmt_f}"); st.dataframe(df_f_disp)
                         st.metric(label="💰 Mnt Total Prévisionnel (€) (mois sel.)",value=f"{gt_f_disp:,.2f} €")
                         st.markdown("#### Export Simulation")
-                        out_b_f=io.BytesIO();df_e_f=df_f_disp.copy() # Shortened
+                        out_b_f=io.BytesIO(); df_e_f=df_f_disp.copy() # Use displayed df for export
                         try:
                             sim_t_fn=sim_t_f_ui.replace(' ','_').lower()
-                            with pd.ExcelWriter(out_b_f,engine="openpyxl")as w_f:df_e_f.to_excel(w_f,sheet_name=sanitize_sheet_name(f"Forecast_{sim_t_fn}"),index=False) # Shortened
+                            with pd.ExcelWriter(out_b_f,engine="openpyxl")as w_f:
+                                df_e_f.to_excel(w_f,sheet_name=sanitize_sheet_name(f"Forecast_{sim_t_fn}"),index=False)
+                                ws_f = w_f.sheets[sanitize_sheet_name(f"Forecast_{sim_t_fn}")]
+                                # Define formats based on fmts_f used for display (adapt format strings)
+                                fcst_col_fmts = {"Tarif d'achat":"#,##0.00€","Conditionnement":"#,##0"}
+                                for m_disp in sel_m_f_ui:
+                                    if f"Ventes N-1 {m_disp}"in df_e_f.columns: fcst_col_fmts[f"Ventes N-1 {m_disp}"] = "#,##0"
+                                    if f"Qté Prév. {m_disp}"in df_e_f.columns: fcst_col_fmts[f"Qté Prév. {m_disp}"] = "#,##0"
+                                    if f"Montant Prév. {m_disp} (€)"in df_e_f.columns: fcst_col_fmts[f"Montant Prév. {m_disp} (€)"] = "#,##0.00€"
+                                if "Vts N-1 Tot (Mois Sel.)" in df_e_f.columns: fcst_col_fmts["Vts N-1 Tot (Mois Sel.)"] = "#,##0"
+                                if "Qté Tot Prév (Mois Sel.)" in df_e_f.columns: fcst_col_fmts["Qté Tot Prév (Mois Sel.)"] = "#,##0"
+                                if "Mnt Tot Prév (€) (Mois Sel.)" in df_e_f.columns: fcst_col_fmts["Mnt Tot Prév (€) (Mois Sel.)"] = "#,##0.00€"
+                                format_excel_sheet(ws_f, df_e_f, column_formats=fcst_col_fmts)
+
                             out_b_f.seek(0)
-                            sup_e_nm_f='multi'if len(selected_fournisseurs_tab4)>1 else(sanitize_sheet_name(selected_fournisseurs_tab4[0])if selected_fournisseurs_tab4 else'NA') # Shortened
-                            f_f_exp=f"forecast_{sim_t_fn}_{sup_e_nm_f}_{pd.Timestamp.now():%Y%m%d_%H%M}.xlsx" # Shortened
-                            st.download_button("📥 Télécharger Simulation",out_b_f,f_f_exp,"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",key="dl_f_b_t4_dl") # Shortened
-                        except Exception as eef_f:st.error(f"Err export forecast: {eef_f}") # Shortened
-                else:st.info("Résultats simulation invalidés. Relancer.")
+                            sup_e_nm_f='multi'if len(selected_fournisseurs_tab4)>1 else(sanitize_sheet_name(selected_fournisseurs_tab4[0])if selected_fournisseurs_tab4 else'NA')
+                            f_f_exp=f"forecast_{sim_t_fn}_{sup_e_nm_f}_{pd.Timestamp.now():%Y%m%d_%H%M}.xlsx"
+                            st.download_button("📥 Télécharger Simulation",out_b_f,f_f_exp,"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",key="dl_f_b_t4_dl")
+                        except Exception as eef_f: st.error(f"Err export forecast: {eef_f}")
+                else: st.info("Résultats simulation invalidés. Relancer.")
 
     with tab5: # Suivi Commandes Fournisseurs
         st.header("📄 Suivi des Commandes Fournisseurs")
@@ -933,13 +1037,13 @@ if 'df_initial_filtered' in st.session_state and isinstance(st.session_state.df_
             st.warning("Aucune donnée de suivi de commandes n'a été chargée (onglet 'Suivi commandes' vide/manquant ou erreur de lecture).")
         else:
             suppliers_in_suivi_list = []
-            if "Fournisseur" in df_suivi_commandes_all_data.columns: # Check after potential rename
+            if "Fournisseur" in df_suivi_commandes_all_data.columns:
                 suppliers_in_suivi_list = sorted(df_suivi_commandes_all_data["Fournisseur"].astype(str).unique().tolist())
             
             if not suppliers_in_suivi_list:
                 st.info("Aucun fournisseur trouvé dans les données de suivi des commandes traitées.")
             else:
-                st.markdown("Sélectionnez les fournisseurs pour lesquels vous souhaitez générer une archive de suivi :") # MODIFIED text
+                st.markdown("Sélectionnez les fournisseurs pour lesquels générer une archive de suivi :")
                 selected_fournisseurs_tab5_ui = render_supplier_checkboxes("tab5", suppliers_in_suivi_list, default_select_all=False)
 
                 if not selected_fournisseurs_tab5_ui:
@@ -947,61 +1051,61 @@ if 'df_initial_filtered' in st.session_state and isinstance(st.session_state.df_
                 else:
                     st.markdown("---"); st.markdown(f"**{len(selected_fournisseurs_tab5_ui)} fournisseur(s) sélectionné(s) pour l'export.**")
                     
-                    # MODIFIED: Button for ZIP archive
                     if st.button("📦 Générer et Télécharger l'Archive ZIP de Suivi", key="generate_suivi_zip_btn_t5"):
                         output_cols_suivi_export = ["Date Pièce BC", "N° de pièce", "AF_RefFourniss", "Désignation Article", "Qté Commandées", "Date de livraison prévue"]
-                        source_cols_needed_suivi = ["Date Pièce BC", "N° de pièce", "AF_RefFourniss", "Désignation Article", "Qté Commandées", "Fournisseur"] # Expecting "Fournisseur" after rename
+                        source_cols_needed_suivi = ["Date Pièce BC", "N° de pièce", "AF_RefFourniss", "Désignation Article", "Qté Commandées", "Fournisseur"]
                         missing_source_cols_suivi_check = [col for col in source_cols_needed_suivi if col not in df_suivi_commandes_all_data.columns]
 
                         if missing_source_cols_suivi_check:
                             st.error(f"Colonnes sources manquantes ('Suivi commandes'): {', '.join(missing_source_cols_suivi_check)}. Export impossible.")
                         else:
-                            # Create a BytesIO buffer for the ZIP file
                             zip_buffer = io.BytesIO()
                             files_added_to_zip = 0
-                            with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zipf:
-                                for sup_name_s_exp in selected_fournisseurs_tab5_ui:
-                                    df_sup_s_exp_data = df_suivi_commandes_all_data[df_suivi_commandes_all_data["Fournisseur"] == sup_name_s_exp].copy()
-                                    if df_sup_s_exp_data.empty:
-                                        logging.info(f"Aucune commande en cours pour {sup_name_s_exp}, fichier non ajouté au ZIP.")
-                                        continue
-                                    
-                                    df_exp_final_s = pd.DataFrame(columns=output_cols_suivi_export)
-                                    if 'Date Pièce BC' in df_sup_s_exp_data: df_exp_final_s["Date Pièce BC"] = pd.to_datetime(df_sup_s_exp_data["Date Pièce BC"], errors='coerce').dt.strftime('%d/%m/%Y').fillna('')
-                                    for col_map in ["N° de pièce", "AF_RefFourniss", "Désignation Article", "Qté Commandées"]:
-                                         if col_map in df_sup_s_exp_data: df_exp_final_s[col_map] = df_sup_s_exp_data[col_map]
-                                    df_exp_final_s["Date de livraison prévue"] = ""
+                            try:
+                                with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zipf:
+                                    for sup_name_s_exp in selected_fournisseurs_tab5_ui:
+                                        df_sup_s_exp_data = df_suivi_commandes_all_data[df_suivi_commandes_all_data["Fournisseur"] == sup_name_s_exp].copy()
+                                        if df_sup_s_exp_data.empty:
+                                            logging.info(f"Aucune commande pour {sup_name_s_exp}, non ajouté au ZIP.")
+                                            continue
+                                        
+                                        df_exp_final_s = pd.DataFrame(columns=output_cols_suivi_export)
+                                        if 'Date Pièce BC' in df_sup_s_exp_data: df_exp_final_s["Date Pièce BC"] = pd.to_datetime(df_sup_s_exp_data["Date Pièce BC"], errors='coerce') # Keep as datetime for excel formatting
+                                        for col_map in ["N° de pièce", "AF_RefFourniss", "Désignation Article", "Qté Commandées"]:
+                                            if col_map in df_sup_s_exp_data: df_exp_final_s[col_map] = df_sup_s_exp_data[col_map]
+                                        df_exp_final_s["Date de livraison prévue"] = "" # Empty column
 
-                                    excel_buffer_individual_suivi = io.BytesIO()
-                                    with pd.ExcelWriter(excel_buffer_individual_suivi, engine="openpyxl", date_format='DD/MM/YYYY', datetime_format='DD/MM/YYYY') as writer_ind_s_exp:
-                                        df_exp_final_s[output_cols_suivi_export].to_excel(writer_ind_s_exp, sheet_name=sanitize_sheet_name(f"Suivi_{sup_name_s_exp}"), index=False)
-                                    
-                                    # Get bytes from the individual Excel buffer
-                                    excel_bytes = excel_buffer_individual_suivi.getvalue()
-                                    
-                                    # Define file name within the ZIP
-                                    file_name_in_zip = f"Suivi_Commande_{sanitize_sheet_name(sup_name_s_exp)}_{pd.Timestamp.now():%Y%m%d}.xlsx"
-                                    zipf.writestr(file_name_in_zip, excel_bytes)
-                                    files_added_to_zip += 1
-                            
-                            if files_added_to_zip > 0:
-                                zip_buffer.seek(0)
-                                archive_name = f"Archive_Suivi_Commandes_{pd.Timestamp.now():%Y%m%d_%H%M}.zip"
-                                st.download_button(
-                                    label=f"📥 Télécharger Archive ZIP ({files_added_to_zip} fichier(s))",
-                                    data=zip_buffer,
-                                    file_name=archive_name,
-                                    mime="application/zip",
-                                    key="dl_suivi_zip_btn_t5_dl"
-                                )
-                                st.success(f"{files_added_to_zip} fichier(s) de suivi inclus dans l'archive ZIP.")
-                            else:
-                                st.info("Aucun fichier de suivi n'a été généré pour l'archive (pas de données pour les fournisseurs sélectionnés ou erreurs).")
+                                        excel_buffer_ind = io.BytesIO() # Buffer for individual file
+                                        with pd.ExcelWriter(excel_buffer_ind, engine="openpyxl", date_format='DD/MM/YYYY', datetime_format='DD/MM/YYYY') as writer_ind:
+                                            df_to_write = df_exp_final_s[output_cols_suivi_export].copy()
+                                            sheet_name = sanitize_sheet_name(f"Suivi_{sup_name_s_exp}")
+                                            df_to_write.to_excel(writer_ind, sheet_name=sheet_name, index=False)
+                                            ws = writer_ind.sheets[sheet_name]
+                                            suivi_col_fmts = {"Date Pièce BC": "dd/mm/yyyy", "Qté Commandées": "#,##0"}
+                                            # Pass df_to_write (which has the correct structure and types)
+                                            format_excel_sheet(ws, df_to_write, column_formats=suivi_col_fmts)
+                                        
+                                        excel_bytes = excel_buffer_ind.getvalue()
+                                        file_name_in_zip = f"Suivi_Commande_{sanitize_sheet_name(sup_name_s_exp)}_{pd.Timestamp.now():%Y%m%d}.xlsx"
+                                        zipf.writestr(file_name_in_zip, excel_bytes)
+                                        files_added_to_zip += 1
+                                
+                                if files_added_to_zip > 0:
+                                    zip_buffer.seek(0)
+                                    archive_name = f"Archive_Suivi_Commandes_{pd.Timestamp.now():%Y%m%d_%H%M}.zip"
+                                    st.download_button(label=f"📥 Télécharger Archive ZIP ({files_added_to_zip} fichier(s))", data=zip_buffer, file_name=archive_name, mime="application/zip", key="dl_suivi_zip_btn_t5_dl")
+                                    st.success(f"{files_added_to_zip} fichier(s) de suivi inclus dans l'archive ZIP.")
+                                else:
+                                    st.info("Aucun fichier de suivi généré (pas de données pour les fournisseurs sélectionnés).")
+                            except Exception as e_zip:
+                                logging.exception(f"Error creating ZIP file for suivi: {e_zip}")
+                                st.error(f"Erreur lors de la création de l'archive ZIP: {e_zip}")
+
 
 elif not uploaded_file:
     st.info("👋 Bienvenue ! Chargez votre fichier Excel principal pour démarrer.")
     if st.button("🔄 Réinitialiser l'Application"):
-        for key_to_del in list(st.session_state.keys()): del st.session_state[key_to_del]
+        for key in list(st.session_state.keys()): del st.session_state[key]
         st.rerun()
 elif 'df_initial_filtered' in st.session_state and not isinstance(st.session_state.df_initial_filtered, pd.DataFrame):
     st.error("Erreur interne : Données filtrées invalides. Rechargez le fichier.")
