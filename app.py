@@ -493,7 +493,7 @@ if uploaded_file and st.session_state.df_full is None:
             if not all(col in df.columns for col in filter_cols):
                 st.error(f"❌ Colonnes filtrage ({', '.join(filter_cols)}) manquantes.")
                 st.stop()
-            df_init_filtered = df[(df["Fournisseur"].notna()) & (df["Fournisseur"] != "") & (df["Fournisseur"] != "#FILTER") & (df["AF_RefFourniss"].notna()) & (df["AF_RefFourniss"] != "")].copy()
+            df_init_filtered = df[(df["Fournisseur"].notna()) & (df["Fournisseur"] != "") & (df["Fournisseur"] != "#FILTER") & (df["AF_RefFourniss"].notna()) & (df["AF_RefFourniss"] != "")]].copy()
             st.session_state.df_initial_filtered = df_init_filtered # Store base filtered data
             start_col_index = 12
             semaine_cols_temp = []
@@ -676,14 +676,14 @@ if 'df_initial_filtered' in st.session_state and st.session_state.df_initial_fil
                                                  sheets_cr_cmd += 1
                                              except Exception as we:
                                                  logging.exception(f"Err sheet {s_name}:{we}")
-                                 else:
-                                     st.error("Export CMD: Erreur cols formules.")
-                         except Exception as e_w:
-                             logging.exception(f"Err writer:{e_w}")
-                         if sheets_cr_cmd > 0:
-                              out_cmd.seek(0)
-                              fname = f"commande_{'multi' if len(sup_cmd_disp)>1 else sanitize_sheet_name(sup_cmd_disp[0])}_{pd.Timestamp.now():%Y%m%d_%H%M}.xlsx"
-                              st.download_button(f"📥 Télécharger ({sheets_cr_cmd})", out_cmd, fname, key="dl_cmd_btn")
+                                         else:
+                                             st.error("Export CMD: Erreur cols formules.")
+                                 except Exception as e_w:
+                                     logging.exception(f"Err writer:{e_w}")
+                                 if sheets_cr_cmd > 0:
+                                     out_cmd.seek(0)
+                                     fname = f"commande_{'multi' if len(sup_cmd_disp)>1 else sanitize_sheet_name(sup_cmd_disp[0])}_{pd.Timestamp.now():%Y%m%d_%H%M}.xlsx"
+                                     st.download_button(f"📥 Télécharger ({sheets_cr_cmd})", out_cmd, fname, key="dl_cmd_btn")
                     else:
                         st.info("Aucune qté > 0 à exporter.")
                 else:
@@ -713,7 +713,7 @@ if 'df_initial_filtered' in st.session_state and st.session_state.df_initial_fil
             col1_r, col2_r = st.columns(2)
             with col1_r:
                 period_opts = {"12 sem.": 12, "52 sem.": 52, "Total": 0}
-                sel_p_lbl = st.selectbox("📅 Période:", period_opts.keys(), key="rot_p_sel")
+                sel_p_lbl = st.selectbox("⏳ Période:", period_opts.keys(), key="rot_p_sel")
                 sel_p_w = period_opts[sel_p_lbl]
             with col2_r:
                 st.markdown("##### Options Affichage")
@@ -723,18 +723,18 @@ if 'df_initial_filtered' in st.session_state and st.session_state.df_initial_fil
             if not show_all:
                 st.session_state.rotation_threshold_value = rot_thr
             if st.button("🔄 Analyser Rotation", key="analyze_rot_btn"):
-                 with st.spinner("Analyse..."):
+                with st.spinner("Analyse..."):
                     df_rot_res = calculer_rotation_stock(df_display_tab2, semaine_columns, sel_p_w)
-                 if df_rot_res is not None:
+                if df_rot_res is not None:
                     st.success("✅ Analyse terminée.")
                     st.session_state.rot_res_df = df_rot_res
                     st.session_state.rot_p_lbl = sel_p_lbl
                     st.session_state.sel_fourn_calc_rot = selected_fournisseurs_tab2
                     st.rerun()
-                 else:
+                else:
                     st.error("❌ Analyse échouée.")
             if 'rot_res_df' in st.session_state and st.session_state.rot_res_df is not None:
-                 if st.session_state.sel_fourn_calc_rot == selected_fournisseurs_tab2:
+                if st.session_state.sel_fourn_calc_rot == selected_fournisseurs_tab2:
                     st.markdown("---")
                     st.markdown(f"#### Résultats Rotation ({st.session_state.get('rot_p_lbl', '')})")
                     df_rot_orig = st.session_state.rot_res_df
@@ -780,32 +780,30 @@ if 'df_initial_filtered' in st.session_state and st.session_state.df_initial_fil
                         st.dataframe(df_rot_disp_cp.style.format(fmters, na_rep="-", thousands=","))
                     st.markdown("#### Export Analyse Affichée")
                     if not df_rot_disp.empty:
-                         out_r = io.BytesIO()
-                         cols_r_base = ["AF_RefFourniss", "Référence Article", "Désignation Article", "Tarif d'achat", "Stock", "Unités Vendues (Période)", "Ventes Moy Hebdo (Période)", "Ventes Moy Mensuel (Période)", "Semaines Stock (WoS)", "Rotation Unités (Proxy)", "Valeur Stock Actuel (€)", "COGS (Période)", "Rotation Valeur (Proxy)"]
-                         cols_r_fourn = ["Fournisseur"] + cols_r_base if "Fournisseur" in df_rot_disp.columns else cols_r_base
-                         cols_r_fin = [c for c in cols_r_fourn if c in df_rot_disp.columns]
-                         df_exp_r = df_rot_disp[cols_r_fin].copy()
-                         for c, d in num_round.items():
-                              if c in df_exp_r.columns:
-                                  df_exp_r[c] = pd.to_numeric(df_exp_r[c], errors='coerce')
-                              if pd.api.types.is_numeric_dtype(df_exp_r[c]):
-                                  df_exp_r[c] = df_exp_r[c].round(d)
-                         df_exp_r.replace([np.inf, -np.inf], 'Infini', inplace=True)
-                         lbl_exp = f"Filtree_{thr_disp:.1f}" if not show_all_f else "Complete"
-                         sh_name = f"Rotation_{lbl_exp}"
-                         f_base = f"analyse_rotation_{lbl_exp}"
-                         with pd.ExcelWriter(out_r, engine="openpyxl") as wr_r:
-                             df_exp_r.to_excel(wr_r, sheet_name=sh_name, index=False)
-                         out_r.seek(0)
-                         sups_exp = selected_fournisseurs_tab2 # Use this tab's selection
-                         f_rot = f"{f_base}_{'multi' if len(sups_exp)>1 else sanitize_sheet_name(sups_exp[0] if sups_exp else 'NA')}_{pd.Timestamp.now():%Y%m%d_%H%M}.xlsx"
-                         dl_lbl = f"📥 Télécharger {'Filtrée' if not show_all_f else 'Complète'}" + (f" (<{thr_disp:.1f}/m)" if not show_all_f else "")
-                         st.download_button(dl_lbl, out_r, f_rot, key="dl_rot_btn")
-                    elif not df_rot_orig.empty:
-                        st.info(f"Aucune donnée selon critères (<{thr_disp:.1f}/m) à exporter.")
+                        out_r = io.BytesIO()
+                        cols_r_base = ["AF_RefFourniss", "Référence Article", "Désignation Article", "Tarif d'achat", "Stock", "Unités Vendues (Période)", "Ventes Moy Hebdo (Période)", "Ventes Moy Mensuel (Période)", "Semaines Stock (WoS)", "Rotation Unités (Proxy)", "Valeur Stock Actuel (€)", "COGS (Période)", "Rotation Valeur (Proxy)"]
+                        cols_r_fourn = ["Fournisseur"] + cols_r_base if "Fournisseur" in df_rot_disp.columns else cols_r_base
+                        cols_r_fin = [c for c in cols_r_fourn if c in df_rot_disp.columns]
+                        df_exp_r = df_rot_disp[cols_r_fin].copy()
+                        for c, d in num_round.items():
+                            if c in df_exp_r.columns:
+                                df_exp_r[c] = pd.to_numeric(df_exp_r[c], errors='coerce')
+                            if pd.api.types.is_numeric_dtype(df_exp_r[c]):
+                                df_exp_r[c] = df_exp_r[c].round(d)
+                        df_exp_r.replace([np.inf, -np.inf], 'Infini', inplace=True)
+                        lbl_exp = f"Filtree_{thr_disp:.1f}" if not show_all_f else "Complete"
+                        sh_name = f"Rotation_{lbl_exp}"
+                        f_base = f"analyse_rotation_{lbl_exp}"
+                        with pd.ExcelWriter(out_r, engine="openpyxl") as wr_r:
+                            df_exp_r.to_excel(wr_r, sheet_name=sh_name, index=False)
+                        out_r.seek(0)
+                        sups_exp = selected_fournisseurs_tab2 # Use this tab's selection
+                        f_rot = f"{f_base}_{'multi' if len(sups_exp)>1 else sanitize_sheet_name(sups_exp[0] if sups_exp else 'NA')}_{pd.Timestamp.now():%Y%m%d_%H%M}.xlsx"
+                        dl_lbl = f"📥 Télécharger ({'Filtrée' if not show_all_f else 'Complète'})"
+                        st.download_button(dl_lbl, out_r, f_rot, key="dl_rot_btn")
                     else:
-                        st.info("Aucune donnée à exporter.")
-                 else:
+                        st.info("Aucune donnée selon critères (<{thr_disp:.1f}/m) à exporter.")
+                else:
                     st.info("Résultats analyse invalidés. Relancez.")
 
     # ========================= TAB 3: Vérification Stock =========================
@@ -834,18 +832,18 @@ if 'df_initial_filtered' in st.session_state and st.session_state.df_initial_fil
                         st.error("Cols manquantes affichage.")
                     else:
                         st.dataframe(df_neg[cols_neg_fin].style.format({"Stock": "{:,.0f}"}, na_rep="-").apply(lambda x: ['background-color:#FADBD8' if v<0 else '' for v in x], subset=['Stock']))
-                    st.markdown("---")
-                    st.markdown("#### Exporter Stocks Négatifs")
-                    out_neg = io.BytesIO()
-                    df_exp_n = df_neg[cols_neg_fin].copy()
-                    try:
-                        with pd.ExcelWriter(out_neg, engine="openpyxl") as w_neg:
-                            df_exp_n.to_excel(w_neg, sheet_name="Stocks_Negatifs", index=False)
-                        out_neg.seek(0)
-                        f_neg = f"stocks_negatifs_{pd.Timestamp.now():%Y%m%d_%H%M}.xlsx"
-                        st.download_button("📥 Télécharger Liste", out_neg, f_neg, key="dl_neg_btn")
-                    except Exception as e_exp_n:
-                        st.error(f"Err export neg: {e_exp_n}")
+                        st.markdown("---")
+                        st.markdown("#### Exporter Stocks Négatifs")
+                        out_neg = io.BytesIO()
+                        df_exp_n = df_neg[cols_neg_fin].copy()
+                        try:
+                            with pd.ExcelWriter(out_neg, engine="openpyxl") as w_neg:
+                                df_exp_n.to_excel(w_neg, sheet_name="Stocks_Negatifs", index=False)
+                            out_neg.seek(0)
+                            f_neg = f"stocks_negatifs_{pd.Timestamp.now():%Y%m%d_%H%M}.xlsx"
+                            st.download_button("📥 Télécharger Liste", out_neg, f_neg, key="dl_neg_btn")
+                        except Exception as e_exp_n:
+                            st.error(f"Err export neg: {e_exp_n}")
 
     # ========================= TAB 4: Simulation Forecast =========================
     with tab4:
@@ -888,27 +886,20 @@ if 'df_initial_filtered' in st.session_state and st.session_state.df_initial_fil
                     obj_mt = st.number_input(label="🎯 Objectif Montant (€) (pour mois sélectionnés)", min_value=0.0, value=st.session_state.get('forecast_target_amount', 10000.0), step=1000.0, format="%.2f", key="fcst_target_amount")
 
             if st.button("▶️ Lancer Simulation", key="run_fcst_sim"):
-                 if not sel_months_fcst:
-                    st.warning("Sélectionnez mois.")
-                 else:
-                    curr_prog = st.session_state.get('forecast_prog_pct', 5.0)
-                    curr_obj = st.session_state.get('forecast_target_amount', 10000.0)
-                    prog_use = curr_prog if sim_t == 'Simple Progression' else 0
-                    obj_use = curr_obj if sim_t == 'Objectif Montant' else 0
-                    with st.spinner("Simulation..."):
-                        df_fcst_res, grand_total = calculer_forecast_simulation_v3(df_display_tab4, semaine_columns, sel_months_fcst, sim_t, prog_use, obj_use)
-                    if df_fcst_res is not None:
-                        st.success("✅ Simulation terminée.")
-                        st.session_state.forecast_result_df = df_fcst_res
-                        st.session_state.forecast_grand_total = grand_total
-                        st.session_state.forecast_params = {'suppliers': selected_fournisseurs_tab4, 'months': sel_months_fcst, 'type': sim_t, 'prog': prog_use, 'obj': obj_use}
-                        st.rerun() # Store tab-specific selection
-                    else:
-                        st.error("❌ Simulation échouée.")
+                with st.spinner("Simulation..."):
+                    df_fcst_res, grand_total = calculer_forecast_simulation_v3(df_display_tab4, semaine_columns, sel_months_fcst, sim_t, prog_pct, obj_mt)
+                if df_fcst_res is not None:
+                    st.success("✅ Simulation terminée.")
+                    st.session_state.forecast_result_df = df_fcst_res
+                    st.session_state.forecast_grand_total = grand_total
+                    st.session_state.forecast_params = {'suppliers': selected_fournisseurs_tab4, 'months': sel_months_fcst, 'type': sim_t, 'prog': prog_pct, 'obj': obj_mt}
+                    st.rerun() # Store tab-specific selection
+                else:
+                    st.error("❌ Simulation échouée.")
             if 'forecast_result_df' in st.session_state and st.session_state.forecast_result_df is not None:
-                 # Compare results with current parameters and THIS TAB's supplier selection
-                 current_params_disp = {'suppliers': selected_fournisseurs_tab4, 'months': sel_months_fcst, 'type': sim_t, 'prog': st.session_state.get('forecast_prog_pct', 5.0) if sim_t=='Simple Progression' else 0, 'obj': st.session_state.get('forecast_target_amount', 10000.0) if sim_t=='Objectif Montant' else 0}
-                 if st.session_state.get('forecast_params') == current_params_disp:
+                # Compare results with current parameters and THIS TAB's supplier selection
+                current_params_disp = {'suppliers': selected_fournisseurs_tab4, 'months': sel_months_fcst, 'type': sim_t, 'prog': st.session_state.get('forecast_prog_pct', 5.0) if sim_t=='Simple Progression' else 0, 'obj': st.session_state.get('forecast_target_amount', 10000.0) if sim_t=='Objectif Montant' else 0}
+                if st.session_state.get('forecast_params') == current_params_disp:
                     st.markdown("---")
                     st.markdown("#### Résultats Simulation")
                     df_fcst_disp = st.session_state.forecast_result_df
@@ -916,36 +907,33 @@ if 'df_initial_filtered' in st.session_state and st.session_state.df_initial_fil
                     mq_cols = [f"Qté Prév. {m}" for m in sel_months_fcst if f"Qté Prév. {m}" in df_fcst_disp.columns]
                     ma_cols = [f"Montant Prév. {m} (€)" for m in sel_months_fcst if f"Montant Prév. {m} (€)" in df_fcst_disp.columns]
                     n1m_cols = [f"Ventes N-1 {m}" for m in sel_months_fcst if f"Ventes N-1 {m}" in df_fcst_disp.columns]
-                    fcst_id = ["Fournisseur", "Référence Article", "Désignation Article", "Conditionnement", "Tarif d'achat"]
-                    fcst_tot = ["Vts N-1 Tot (Mois Sel.)", "Qté Tot Prév (Mois Sel.)", "Mnt Tot Prév (€) (Mois Sel.)"]
-                    fcst_disp_cols = fcst_id + fcst_tot + n1m_cols + mq_cols + ma_cols
+                    fcst_disp_fin = df_fcst_disp.columns.tolist() # Colonnes déjà ordonnées
+
                     if df_fcst_disp.empty:
                         st.info("Aucun résultat.")
-                    elif not fcst_disp_cols:
-                        st.error("Erreur: Colonnes résultats manquantes.")
+                    elif not fcst_disp_fin:
+                        st.error("Erreur: Colonnes résultats de prévision manquantes.")
                     else:
-                        fcst_fmters = {"Tarif d'achat": "{:,.2f}€", "Conditionnement": "{:,.0f}", "Vts N-1 Tot (Mois Sel.)": "{:,.0f}", "Qté Tot Prév (Mois Sel.)": "{:,.0f}", "Mnt Tot Prév (€) (Mois Sel.)": "{:,.2f}€"}
-                        for c in n1m_cols:
-                            fcst_fmters[c] = "{:,.0f}"
-                        for c in mq_cols:
-                            fcst_fmters[c] = "{:,.0f}"
-                        for c in ma_cols:
-                            fcst_fmters[c] = "{:,.2f}€"
-                        fcst_fmters_final = {k: v for k, v in fcst_fmters.items() if k in fcst_disp_cols}
+                        fcst_fmters_final = {}
+                        id_cols = ["Fournisseur", "Référence Article", "Désignation Article", "Conditionnement", "Tarif d'achat"]
+                        for col in n1m_cols: fcst_fmters_final[col] = "{:,.0f}"
+                        for col in mq_cols: fcst_fmters_final[col] = "{:,.0f}"
+                        for col in ma_cols: fcst_fmters_final[col] = "{:,.2f}€"
+                        fcst_fmters_final = {k: v for k, v in fcst_fmters_final.items() if k in fcst_disp_fin}
                         try:
-                            st.dataframe(df_fcst_disp[fcst_disp_cols].style.format(fcst_fmters_final, na_rep="-", thousands=","))
+                            st.dataframe(df_fcst_disp[fcst_disp_fin].style.format(fcst_fmters_final, na_rep="-", thousands=","))
                         except Exception as e_fmt:
                             st.error(f"Erreur formatage affichage: {e_fmt}")
-                            st.dataframe(df_fcst_disp[fcst_disp_cols])
+                            st.dataframe(df_fcst_disp[fcst_disp_fin])
                         st.metric(label="Montant Total Général Prévisionnel (€)", value=f"{grand_total_disp:,.2f} €")
 
                         # Export Forecast Results
                         st.markdown("#### Export Simulation")
                         out_f = io.BytesIO()
-                        df_exp_f = df_fcst_disp[fcst_disp_cols].copy()
+                        df_exp_f = df_fcst_disp[fcst_disp_fin].copy()
                         try:
                             with pd.ExcelWriter(out_f, engine="openpyxl") as w_f:
-                                df_exp_f.to_excel(w_f, sheet_name=f"Forecast_{sim_t.replace(' ','_')}", index=False)
+                                df_exp_f.to_excel(w_f, sheet_name=f"Forecast_{sim_t.replace(' ','_').lower()}", index=False)
                             out_f.seek(0)
                             fb = f"forecast_{sim_t.replace(' ','_').lower()}"
                             sups_f = selected_fournisseurs_tab4 # Utiliser sélection onglet
@@ -953,17 +941,17 @@ if 'df_initial_filtered' in st.session_state and st.session_state.df_initial_fil
                             st.download_button("📥 Télécharger Simulation", out_f, f_fcst, key="dl_fcst_btn")
                         except Exception as eef:
                             st.error(f"Err export forecast: {eef}")
-                 else:
+                else:
                     st.info("Résultats simulation invalidés. Relancez.")
 
 # --- App footer/initial message ---
 elif not uploaded_file:
     st.info("👋 Bienvenue ! Chargez votre fichier Excel pour commencer.")
     if st.button("🔄 Réinitialiser l'application"):
-         keys_to_clear = list(st.session_state.keys())
-         # Clear dynamically created keys too
-         dynamic_keys = [k for k in st.session_state if k.startswith(('tab1_', 'tab2_', 'tab4_'))]
-         keys_to_clear.extend(dynamic_keys)
-         for key in keys_to_clear:
-             if key in st.session_state: del st.session_state[key]
-         st.rerun()
+        keys_to_clear = list(st.session_state.keys())
+        # Clear dynamically created keys too
+        dynamic_keys = [k for k in st.session_state if k.startswith(('tab1_', 'tab2_', 'tab4_'))]
+        keys_to_clear.extend(dynamic_keys)
+        for key in keys_to_clear:
+            if key in st.session_state: del st.session_state[key]
+        st.rerun()
