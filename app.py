@@ -21,42 +21,24 @@ def safe_read_excel(uploaded_file, sheet_name, **kwargs):
         if isinstance(uploaded_file, io.BytesIO): uploaded_file.seek(0)
         file_name = getattr(uploaded_file, 'name', '')
         engine = 'openpyxl' if file_name.lower().endswith('.xlsx') else None
-        
         logging.debug(f"Attempting to read sheet: '{sheet_name}' with kwargs: {kwargs}")
         df = pd.read_excel(uploaded_file, sheet_name=sheet_name, engine=engine, **kwargs)
-        
-        if df is None:
-            logging.error(f"Pandas read_excel returned None for sheet '{sheet_name}'.")
-            return None
+        if df is None: logging.error(f"Pandas read_excel returned None for sheet '{sheet_name}'."); return None
         logging.debug(f"Read sheet '{sheet_name}'. DataFrame empty: {df.empty}, Columns: {df.columns.tolist()}, Shape: {df.shape}")
-        
-        if len(df.columns) == 0:
-             logging.warning(f"Sheet '{sheet_name}' was read but has no columns.")
-             return None
+        if len(df.columns) == 0: logging.warning(f"Sheet '{sheet_name}' was read but has no columns."); return None
         return df
     except ValueError as e:
         if f"Worksheet named '{sheet_name}' not found" in str(e) or f"'{sheet_name}' not found" in str(e):
-             logging.warning(f"Sheet '{sheet_name}' not found in the Excel file.")
-             st.warning(f"⚠️ Onglet '{sheet_name}' non trouvé dans le fichier Excel.")
-        else:
-             logging.error(f"ValueError reading sheet '{sheet_name}': {e}")
-             st.error(f"❌ Erreur de valeur lors de la lecture de l'onglet '{sheet_name}': {e}.")
+             logging.warning(f"Sheet '{sheet_name}' not found."); st.warning(f"⚠️ Onglet '{sheet_name}' non trouvé.")
+        else: logging.error(f"ValueError reading sheet '{sheet_name}': {e}"); st.error(f"❌ Erreur valeur onglet '{sheet_name}': {e}.")
         return None
-    except FileNotFoundError:
-        logging.error(f"FileNotFoundError (unexpected with BytesIO) reading sheet '{sheet_name}'.")
-        st.error(f"❌ Fichier non trouvé (erreur interne) lors de la lecture de l'onglet '{sheet_name}'.")
-        return None
+    except FileNotFoundError: logging.error(f"FNFE reading sheet '{sheet_name}'."); st.error(f"❌ Fichier non trouvé (interne) onglet '{sheet_name}'."); return None
     except Exception as e:
-        if "zip file" in str(e).lower():
-             logging.error(f"Error reading sheet '{sheet_name}': Bad zip file (corrupted .xlsx) - {e}")
-             st.error(f"❌ Erreur lors de la lecture de l'onglet '{sheet_name}': Fichier .xlsx potentiellement corrompu (erreur zip).")
-        else:
-            logging.error(f"Unexpected error reading sheet '{sheet_name}': {type(e).__name__} - {e}")
-            st.error(f"❌ Erreur inattendue ('{type(e).__name__}') lors de la lecture de l'onglet '{sheet_name}': {e}.")
+        if "zip file" in str(e).lower(): logging.error(f"Error reading sheet '{sheet_name}': Bad zip file - {e}"); st.error(f"❌ Erreur onglet '{sheet_name}': Fichier .xlsx corrompu (zip).")
+        else: logging.error(f"Unexpected error reading sheet '{sheet_name}': {type(e).__name__} - {e}"); st.error(f"❌ Erreur inattendue onglet '{sheet_name}': {e}.")
         return None
 
 def format_excel_sheet(worksheet, df, column_formats={}, freeze_header=True, default_float_format="#,##0.00", default_int_format="#,##0", default_date_format="dd/mm/yyyy"):
-    """Applies formatting to an openpyxl worksheet based on a DataFrame."""
     if df is None or df.empty: logging.warning("Attempted to format sheet with empty/None DataFrame."); return
     header_font=Font(bold=True,color="FFFFFF"); header_fill=PatternFill(start_color="4F81BD",end_color="4F81BD",fill_type="solid")
     header_alignment=Alignment(horizontal="center",vertical="center",wrap_text=True); data_alignment=Alignment(vertical="center")
@@ -85,10 +67,6 @@ def format_excel_sheet(worksheet, df, column_formats={}, freeze_header=True, def
     if freeze_header: worksheet.freeze_panes=worksheet['A2']
 
 def calculer_quantite_a_commander(df, semaine_columns, montant_minimum_input, duree_semaines, increase_percentage=0.0):
-    """
-    Calcule la quantité à commander, en appliquant éventuellement une augmentation %.
-    Retourne: tuple: (qcomm, ventes_N1, v12N1, v12last, mt_final, augmentation_appliquee) ou None.
-    """
     try:
         if not isinstance(df, pd.DataFrame) or df.empty: st.info("Aucune donnée pour calcul qtés."); return None
         req_cols=["Stock","Conditionnement","Tarif d'achat"]+semaine_columns; miss_cols=[c for c in req_cols if c not in df.columns]
@@ -105,13 +83,11 @@ def calculer_quantite_a_commander(df, semaine_columns, montant_minimum_input, du
         if nb_sem_rec>0: v12last=df_calc[semaine_columns[-nb_sem_rec:]].sum(axis=1); avg12last=v12last/nb_sem_rec
         else: v12last,avg12last=(pd.Series(0.0,index=df_calc.index)for _ in range(2))
         qpond=(0.5*avg12last+0.2*avg12N1+0.3*avg12N1s); qnec_base = qpond * duree_semaines
-        
         augmentation_appliquee=False
         if increase_percentage>0:
             qnec=qnec_base*(1+increase_percentage/100.0); augmentation_appliquee=True
             logging.info(f"Application augmentation {increase_percentage}% sur qnec.")
         else: qnec=qnec_base
-        
         qcomm_s=(qnec-df_calc["Stock"]).apply(lambda x:max(0,x))
         cond,stock,tarif=df_calc["Conditionnement"],df_calc["Stock"],df_calc["Tarif d'achat"]
         qcomm=qcomm_s.tolist()
@@ -247,7 +223,8 @@ def calculer_forecast_simulation_v3(df, all_semaine_columns, selected_months, si
             if objectif_montant<=0:st.error("Objectif Montant > 0 requis.");return None,0.0
             total_n1_units_all=total_n1_sales_selected_months_series.sum()
             if total_n1_units_all<=0:
-                st.warning("Ventes N-1 nulles. Répartition égale du montant objectif."); num_sel_m=len(selected_months)
+                st.warning("Ventes N-1 nulles. Répartition égale du montant objectif.")
+                num_sel_m=len(selected_months)
                 if num_sel_m == 0: logging.warning("calc_fcst_sim_v3: selected_months empty."); return None, 0.0
                 target_amt_p_m=objectif_montant/num_sel_m; num_items_price=(df_sim["Tarif d'achat"]>0).sum()
                 for m_name in selected_months:
@@ -298,8 +275,8 @@ def render_supplier_checkboxes(tab_key_prefix,all_suppliers,default_select_all=F
     else:
         for cb_k in sup_cb_ks.values():
             if cb_k not in st.session_state:st.session_state[cb_k]=st.session_state[sel_all_k]
-    def toggle_all_s_tab(): curr_sel_all_v=st.session_state[sel_all_k]; [st.session_state.update({cb_k:curr_sel_all_v}) for cb_k in sup_cb_ks.values()] # Shortened loop
-    def check_ind_s_tab(): all_ind_chk=all(st.session_state.get(cb_k,False)for cb_k in sup_cb_ks.values()); st.session_state[sel_all_k]=all_ind_chk if st.session_state.get(sel_all_k)!=all_ind_chk else st.session_state[sel_all_k] # Shortened
+    def toggle_all_s_tab(): curr_sel_all_v=st.session_state[sel_all_k]; [st.session_state.update({cb_k:curr_sel_all_v}) for cb_k in sup_cb_ks.values()]
+    def check_ind_s_tab(): all_ind_chk=all(st.session_state.get(cb_k,False)for cb_k in sup_cb_ks.values()); st.session_state[sel_all_k]=all_ind_chk if st.session_state.get(sel_all_k)!=all_ind_chk else st.session_state[sel_all_k]
     exp_lbl="👤 Sélectionner Fournisseurs";
     if tab_key_prefix=="tab5":exp_lbl="👤 Sélectionner Fournisseurs pour Export Suivi"
     with st.expander(exp_lbl,expanded=True):
@@ -322,7 +299,7 @@ uploaded_file=st.file_uploader("📁 Charger le fichier Excel principal",type=["
 
 def get_default_session_state():
     return {'df_full':None,'min_order_dict':{},'df_initial_filtered':pd.DataFrame(),'all_available_semaine_columns':[],'unique_suppliers_list':[],
-            'commande_result_df':None,'commande_calculated_total_amount':0.0,'commande_suppliers_calculated_for':[], 'commande_increase_applied': False, 'commande_increase_pct': 0.0, # Added state for increase info
+            'commande_result_df':None,'commande_calculated_total_amount':0.0,'commande_suppliers_calculated_for':[], 'commande_increase_applied': False, 'commande_increase_pct': 0.0,
             'rotation_result_df':None,'rotation_analysis_period_label':"",'rotation_suppliers_calculated_for':[],'rotation_threshold_value':1.0,'show_all_rotation_data':True,
             'forecast_result_df':None,'forecast_grand_total_amount':0.0,'forecast_simulation_params_calculated_for':{},'forecast_selected_months_ui':list(calendar.month_name)[1:],'forecast_sim_type_radio_index':0,
             'forecast_progression_percentage_ui':5.0,'forecast_target_amount_ui':10000.0,'df_suivi_commandes':None}
@@ -410,18 +387,16 @@ if 'df_initial_filtered'in st.session_state and isinstance(st.session_state.df_i
         if df_disp_t1.empty and sel_f_t1:st.warning("Aucun article pour fournisseur(s) sélectionné(s).")
         elif not id_sem_cols and not df_disp_t1.empty:st.warning("Colonnes ventes non identifiées.")
         elif not df_disp_t1.empty:
-            st.markdown("#### Paramètres Calcul Commande")
-            c1_p,c2_p,c3_p=st.columns(3); # Shortened
+            st.markdown("#### Paramètres Calcul Commande"); c1_p,c2_p,c3_p=st.columns(3);
             with c1_p:d_s_c=st.number_input("⏳ Couverture (sem.)",1,260,4,1,key="d_s_c_t1")
             with c2_p:m_m_c=st.number_input("💶 Montant min (€)",0.0,value=0.0,step=50.0,format="%.2f",key="m_m_c_t1")
-            with c3_p:
-                inc_pct_ui=st.number_input(label="📈 Augmentation Cmd (%)",min_value=0.0,value=0.0,step=1.0,format="%.1f",key="inc_pct_t1",help="Appliquer % aux qtés nécessaires avant arrondi. Actif si UN SEUL fournisseur.",disabled=len(sel_f_t1)!=1) # Shortened
+            with c3_p: inc_pct_ui=st.number_input(label="📈 Augmentation Cmd (%)",min_value=0.0,value=0.0,step=1.0,format="%.1f",key="inc_pct_t1",help="Appliquer % aux qtés nécessaires avant arrondi. Actif si UN SEUL fournisseur.",disabled=len(sel_f_t1)!=1)
             if st.button("🚀 Calculer Qtés Cmd",key="calc_q_c_b_t1"):
-                inc_pct_apply=inc_pct_ui if len(sel_f_t1)==1 and inc_pct_ui>0 else 0.0 # Shortened
+                inc_pct_apply=inc_pct_ui if len(sel_f_t1)==1 and inc_pct_ui>0 else 0.0
                 if inc_pct_apply>0: st.info(f"Calcul avec augmentation de {inc_pct_apply:.1f}% pour {sel_f_t1[0]}...")
                 with st.spinner("Calcul qtés..."): res_c=calculer_quantite_a_commander(df_disp_t1,id_sem_cols,m_m_c,d_s_c,increase_percentage=inc_pct_apply)
                 if res_c:
-                    q_c,vN1,v12N1,v12l,m_c,aug_eff=res_c # Shortened
+                    q_c,vN1,v12N1,v12l,m_c,aug_eff=res_c
                     if aug_eff: st.success(f"✅ Calcul OK (augmentation de {inc_pct_apply:.1f}% appliquée).")
                     else: st.success("✅ Calcul qtés OK.")
                     df_r_c=df_disp_t1.copy(); df_r_c["Qte Cmdée"]=q_c
@@ -437,12 +412,14 @@ if 'df_initial_filtered'in st.session_state and isinstance(st.session_state.df_i
             if st.session_state.get('commande_result_df')is not None and st.session_state.get('commande_suppliers_calculated_for')==sel_f_t1:
                 st.markdown("---");st.markdown("#### Résultats Prévision Commande")
                 df_c_d=st.session_state.commande_result_df; m_c_d=st.session_state.commande_calculated_total_amount; s_c_d=st.session_state.commande_suppliers_calculated_for
-                if st.session_state.get('commande_increase_applied',False): st.caption(f"ℹ️ _Augmentation de {st.session_state.get('commande_increase_pct',0.0):.1f}% appliquée au besoin._") # Shortened
+                if st.session_state.get('commande_increase_applied',False): st.caption(f"ℹ️ _Augmentation de {st.session_state.get('commande_increase_pct',0.0):.1f}% appliquée au besoin._")
                 st.metric(label="💰 Montant Total Cmd Final",value=f"{m_c_d:,.2f} €")
                 if len(s_c_d)==1:
                     s_s=s_c_d[0]
-                    if s_s in min_o_amts: r_m_s=min_o_amts[s_s]; a_t_s=df_c_d[df_c_d["Fournisseur"]==s_s]["Total Cmd (€)"].sum();
-                    if r_m_s>0 and a_t_s<r_m_s: st.warning(f"⚠️ Min non atteint ({s_s}): {a_t_s:,.2f}€ / Requis: {r_m_s:,.2f}€ (Manque: {r_m_s-a_t_s:,.2f}€)")
+                    if s_s in min_o_amts: # Corrected: Check if supplier has min order defined
+                        r_m_s=min_o_amts[s_s]; a_t_s=df_c_d[df_c_d["Fournisseur"]==s_s]["Total Cmd (€)"].sum()
+                        if r_m_s > 0 and a_t_s < r_m_s: # Indented correctly
+                             st.warning(f"⚠️ Min non atteint ({s_s}): {a_t_s:,.2f}€ / Requis: {r_m_s:,.2f}€ (Manque: {r_m_s-a_t_s:,.2f}€)")
                 cols_s_c=["Fournisseur","AF_RefFourniss","Référence Article","Désignation Article","Stock","Vts N-1 Total (calc)","Vts 12 N-1 Sim (calc)","Vts 12 Dern. (calc)","Conditionnement","Qte Cmdée","Stock Terme","Tarif Ach.","Total Cmd (€)"]
                 disp_c_c=[c for c in cols_s_c if c in df_c_d.columns]
                 if not disp_c_c:st.error("Aucune col à afficher (cmd).")
@@ -504,9 +481,7 @@ if 'df_initial_filtered'in st.session_state and isinstance(st.session_state.df_i
                 if not show_all_r: st.session_state.rotation_threshold_value=r_thr_ui
             if st.button("🔄 Analyser Rotation",key="analyze_r_btn_t2"):
                 with st.spinner("Analyse rotation..."): df_r_res=calculer_rotation_stock(df_disp_t2,id_sem_cols,sel_p_w_r)
-                if df_r_res is not None:
-                    st.success("✅ Analyse rotation OK."); st.session_state.rotation_result_df=df_r_res
-                    st.session_state.rotation_analysis_period_label=sel_p_lbl_r; st.session_state.rotation_suppliers_calculated_for=sel_f_t2; st.rerun()
+                if df_r_res is not None: st.success("✅ Analyse rotation OK."); st.session_state.rotation_result_df=df_r_res; st.session_state.rotation_analysis_period_label=sel_p_lbl_r; st.session_state.rotation_suppliers_calculated_for=sel_f_t2; st.rerun()
                 else: st.error("❌ Analyse rotation échouée.")
             if st.session_state.rotation_result_df is not None and st.session_state.rotation_suppliers_calculated_for==sel_f_t2:
                 st.markdown("---"); st.markdown(f"#### Résultats Rotation ({st.session_state.rotation_analysis_period_label})")
