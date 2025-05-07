@@ -14,6 +14,12 @@ import zipfile
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # --- Helper Functions ---
+# (safe_read_excel, format_excel_sheet, calculer_quantite_a_commander, etc... unchanged)
+# --- Coller ici TOUTES les fonctions helper précédentes ---
+# format_excel_sheet, calculer_quantite_a_commander, calculer_rotation_stock,
+# approx_weeks_to_months, calculer_forecast_simulation_v3, sanitize_sheet_name,
+# render_supplier_checkboxes, sanitize_supplier_key
+# safe_read_excel (Assurez-vous qu'elles sont toutes présentes)
 
 def safe_read_excel(uploaded_file, sheet_name, **kwargs):
     """ Safely reads an Excel sheet, returning None if sheet not found or error occurs. """
@@ -21,38 +27,21 @@ def safe_read_excel(uploaded_file, sheet_name, **kwargs):
         if isinstance(uploaded_file, io.BytesIO): uploaded_file.seek(0)
         file_name = getattr(uploaded_file, 'name', '')
         engine = 'openpyxl' if file_name.lower().endswith('.xlsx') else None
-        
         logging.debug(f"Attempting to read sheet: '{sheet_name}' with kwargs: {kwargs}")
         df = pd.read_excel(uploaded_file, sheet_name=sheet_name, engine=engine, **kwargs)
-        
-        if df is None:
-            logging.error(f"Pandas read_excel returned None for sheet '{sheet_name}'.")
-            return None
+        if df is None: logging.error(f"Pandas read_excel returned None for sheet '{sheet_name}'."); return None
         logging.debug(f"Read sheet '{sheet_name}'. DataFrame empty: {df.empty}, Columns: {df.columns.tolist()}, Shape: {df.shape}")
-        
-        if len(df.columns) == 0:
-             logging.warning(f"Sheet '{sheet_name}' was read but has no columns.")
-             return None
+        if len(df.columns) == 0: logging.warning(f"Sheet '{sheet_name}' has no columns."); return None
         return df
     except ValueError as e:
         if f"Worksheet named '{sheet_name}' not found" in str(e) or f"'{sheet_name}' not found" in str(e):
-             logging.warning(f"Sheet '{sheet_name}' not found in the Excel file.")
-             st.warning(f"⚠️ Onglet '{sheet_name}' non trouvé dans le fichier Excel.")
-        else:
-             logging.error(f"ValueError reading sheet '{sheet_name}': {e}")
-             st.error(f"❌ Erreur de valeur lors de la lecture de l'onglet '{sheet_name}': {e}.")
+             logging.warning(f"Sheet '{sheet_name}' not found."); st.warning(f"⚠️ Onglet '{sheet_name}' non trouvé.")
+        else: logging.error(f"ValueError reading sheet '{sheet_name}': {e}"); st.error(f"❌ Erreur valeur onglet '{sheet_name}': {e}.")
         return None
-    except FileNotFoundError:
-        logging.error(f"FileNotFoundError (unexpected with BytesIO) reading sheet '{sheet_name}'.")
-        st.error(f"❌ Fichier non trouvé (erreur interne) lors de la lecture de l'onglet '{sheet_name}'.")
-        return None
+    except FileNotFoundError: logging.error(f"FNFE reading sheet '{sheet_name}'."); st.error(f"❌ Fichier non trouvé (interne) onglet '{sheet_name}'."); return None
     except Exception as e:
-        if "zip file" in str(e).lower():
-             logging.error(f"Error reading sheet '{sheet_name}': Bad zip file (corrupted .xlsx) - {e}")
-             st.error(f"❌ Erreur lors de la lecture de l'onglet '{sheet_name}': Fichier .xlsx potentiellement corrompu (erreur zip).")
-        else:
-            logging.error(f"Unexpected error reading sheet '{sheet_name}': {type(e).__name__} - {e}")
-            st.error(f"❌ Erreur inattendue ('{type(e).__name__}') lors de la lecture de l'onglet '{sheet_name}': {e}.")
+        if "zip file" in str(e).lower(): logging.error(f"Error reading sheet '{sheet_name}': Bad zip file - {e}"); st.error(f"❌ Erreur onglet '{sheet_name}': Fichier .xlsx corrompu (zip).")
+        else: logging.error(f"Unexpected error reading sheet '{sheet_name}': {type(e).__name__} - {e}"); st.error(f"❌ Erreur inattendue onglet '{sheet_name}': {e}.")
         return None
 
 def format_excel_sheet(worksheet, df, column_formats={}, freeze_header=True, default_float_format="#,##0.00", default_int_format="#,##0", default_date_format="dd/mm/yyyy"):
@@ -61,17 +50,17 @@ def format_excel_sheet(worksheet, df, column_formats={}, freeze_header=True, def
     header_alignment=Alignment(horizontal="center",vertical="center",wrap_text=True); data_alignment=Alignment(vertical="center")
     for cell in worksheet[1]: cell.font=header_font; cell.fill=header_fill; cell.alignment=header_alignment
     for idx,col_name in enumerate(df.columns):
-        col_letter=get_column_letter(idx+1); num_fmt_apply=None # Shortened
+        col_letter=get_column_letter(idx+1); num_fmt_apply=None
         try:
-            hdr_len=len(str(col_name)); non_na_s=df[col_name].dropna() # Shortened
-            samp_data=non_na_s.sample(min(len(non_na_s),20))if not non_na_s.empty else pd.Series([]) # Shortened
+            hdr_len=len(str(col_name)); non_na_s=df[col_name].dropna()
+            samp_data=non_na_s.sample(min(len(non_na_s),20))if not non_na_s.empty else pd.Series([])
             data_len=samp_data.astype(str).map(len).max()if not samp_data.empty else 0
             max_len=max(hdr_len,data_len if pd.notna(data_len)else 0)+3; max_len=min(max(max_len,10),50)
             worksheet.column_dimensions[col_letter].width=max_len
-        except Exception as e: logging.warning(f"Could not set width for col {col_name}: {e}"); worksheet.column_dimensions[col_letter].width=15 # Shortened
-        spec_fmt=column_formats.get(col_name) # Shortened
+        except Exception as e: logging.warning(f"Could not set width for col {col_name}: {e}"); worksheet.column_dimensions[col_letter].width=15
+        spec_fmt=column_formats.get(col_name)
         try: col_dtype=df[col_name].dtype
-        except KeyError: logging.warning(f"Col '{col_name}' not in DataFrame for fmt."); continue # Shortened
+        except KeyError: logging.warning(f"Col '{col_name}' not in DataFrame for fmt."); continue
         if spec_fmt: num_fmt_apply=spec_fmt
         elif pd.api.types.is_integer_dtype(col_dtype): num_fmt_apply=default_int_format
         elif pd.api.types.is_float_dtype(col_dtype): num_fmt_apply=default_float_format
@@ -80,71 +69,70 @@ def format_excel_sheet(worksheet, df, column_formats={}, freeze_header=True, def
             cell=worksheet[f"{col_letter}{row_idx}"]; cell.alignment=data_alignment
             if num_fmt_apply and not str(cell.value).startswith('='):
                 try: cell.number_format=num_fmt_apply
-                except Exception as e_fmt_c: logging.warning(f"Could not apply format to cell {col_letter}{row_idx}: {e_fmt_c}") # Shortened
+                except Exception as e_fmt_c: logging.warning(f"Could not apply format to cell {col_letter}{row_idx}: {e_fmt_c}")
     if freeze_header: worksheet.freeze_panes=worksheet['A2']
 
 def calculer_quantite_a_commander(df, semaine_columns, montant_minimum_input, duree_semaines):
     try:
-        if not isinstance(df, pd.DataFrame) or df.empty: st.info("Aucune donnée pour calcul qtés."); return None # Shortened
-        req_cols=["Stock","Conditionnement","Tarif d'achat"]+semaine_columns # Shortened
-        miss_cols=[c for c in req_cols if c not in df.columns] # Shortened
+        if not isinstance(df, pd.DataFrame) or df.empty: st.info("Aucune donnée pour calcul qtés."); return None
+        req_cols=["Stock","Conditionnement","Tarif d'achat"]+semaine_columns; miss_cols=[c for c in req_cols if c not in df.columns]
         if miss_cols: st.error(f"Cols manquantes (calcul): {', '.join(miss_cols)}"); return None
-        if not semaine_columns: st.error("Aucune col 'semaine' identifiée (calcul)."); return None # Shortened
+        if not semaine_columns: st.error("Aucune col 'semaine' identifiée (calcul)."); return None
         df_calc=df.copy()
         for col in req_cols: df_calc[col]=pd.to_numeric(df_calc[col],errors='coerce').replace([np.inf,-np.inf],np.nan).fillna(0)
-        num_sem_tot=len(semaine_columns); ventes_N1=df_calc[semaine_columns].sum(axis=1) # Shortened
+        num_sem_tot=len(semaine_columns); ventes_N1=df_calc[semaine_columns].sum(axis=1)
         if num_sem_tot>=64:
             v12N1=df_calc[semaine_columns[-64:-52]].sum(axis=1); v12N1s=df_calc[semaine_columns[-52:-40]].sum(axis=1)
             avg12N1=v12N1/12; avg12N1s=v12N1s/12
-        else: v12N1,v12N1s,avg12N1,avg12N1s=(pd.Series(0.0,index=df_calc.index)for _ in range(4)) # Shortened
-        nb_sem_rec=min(num_sem_tot,12) # Shortened
+        else: v12N1,v12N1s,avg12N1,avg12N1s=(pd.Series(0.0,index=df_calc.index)for _ in range(4))
+        nb_sem_rec=min(num_sem_tot,12)
         if nb_sem_rec>0: v12last=df_calc[semaine_columns[-nb_sem_rec:]].sum(axis=1); avg12last=v12last/nb_sem_rec
-        else: v12last,avg12last=(pd.Series(0.0,index=df_calc.index)for _ in range(2)) # Shortened
+        else: v12last,avg12last=(pd.Series(0.0,index=df_calc.index)for _ in range(2))
         qpond=(0.5*avg12last+0.2*avg12N1+0.3*avg12N1s); qnec=qpond*duree_semaines
-        qcomm_s=(qnec-df_calc["Stock"]).apply(lambda x:max(0,x)) # Shortened
-        cond,stock,tarif=df_calc["Conditionnement"],df_calc["Stock"],df_calc["Tarif d'achat"] # Shortened
+        qcomm_s=(qnec-df_calc["Stock"]).apply(lambda x:max(0,x))
+        cond,stock,tarif=df_calc["Conditionnement"],df_calc["Stock"],df_calc["Tarif d'achat"]
         qcomm=qcomm_s.tolist()
         for i in range(len(qcomm)):
-            c,q=cond.iloc[i],qcomm[i] # Shortened
+            c,q=cond.iloc[i],qcomm[i]
             if q>0 and c>0: qcomm[i]=int(np.ceil(q/c)*c)
-            elif q>0 and c<=0: logging.warning(f"Art idx {df_calc.index[i]} (Ref: {df_calc.get('Référence Article',pd.Series(['N/A']))[i]}) Qté {q:.2f} ignorée car cond={c}."); qcomm[i]=0 # Shortened
+            elif q>0 and c<=0: logging.warning(f"Art idx {df_calc.index[i]} (Ref: {df_calc.get('Référence Article',pd.Series(['N/A']))[i]}) Qté {q:.2f} ignorée car cond={c}."); qcomm[i]=0
             else: qcomm[i]=0
         if nb_sem_rec>0:
             for i in range(len(qcomm)):
-                c=cond.iloc[i]; vr_cnt=(df_calc[semaine_columns[-nb_sem_rec:]].iloc[i]>0).sum() # Shortened
+                c=cond.iloc[i]; vr_cnt=(df_calc[semaine_columns[-nb_sem_rec:]].iloc[i]>0).sum()
                 if vr_cnt>=2 and stock.iloc[i]<=1 and c>0: qcomm[i]=max(qcomm[i],c)
         for i in range(len(qcomm)):
-            vt_n1_it,vr_sum_it=ventes_N1.iloc[i],v12last.iloc[i] # Shortened
+            vt_n1_it,vr_sum_it=ventes_N1.iloc[i],v12last.iloc[i]
             if vt_n1_it<6 and vr_sum_it<2: qcomm[i]=0
-        qcomm_df_t=pd.Series(qcomm,index=df_calc.index); mt_avant_adj= (qcomm_df_t*tarif).sum() # Shortened
+        qcomm_df_t=pd.Series(qcomm,index=df_calc.index); mt_avant_adj= (qcomm_df_t*tarif).sum()
         if montant_minimum_input>0 and mt_avant_adj<montant_minimum_input:
-            mt_act=mt_avant_adj; elig_incr=[] # Shortened
+            mt_act=mt_avant_adj; elig_incr=[]
             for i in range(len(qcomm)):
                 if qcomm[i]>0 and cond.iloc[i]>0 and tarif.iloc[i]>0: elig_incr.append(i)
             if not elig_incr:
-                if mt_act<montant_minimum_input: st.warning(f"Impossible atteindre min {montant_minimum_input:,.2f}€. Actuel: {mt_act:,.2f}€. Aucun article éligible.") # Shortened
+                if mt_act<montant_minimum_input: st.warning(f"Impossible atteindre min {montant_minimum_input:,.2f}€. Actuel: {mt_act:,.2f}€. Aucun article éligible.")
             else:
-                idx_ptr_el=0; max_iter_l=len(elig_incr)*20+1; iters=0 # Shortened
+                idx_ptr_el=0; max_iter_l=len(elig_incr)*20+1; iters=0
                 while mt_act<montant_minimum_input and iters<max_iter_l:
-                    iters+=1; orig_df_idx=elig_incr[idx_ptr_el] # Shortened
-                    c_it,p_it=cond.iloc[orig_df_idx],tarif.iloc[orig_df_idx] # Shortened
+                    iters+=1; orig_df_idx=elig_incr[idx_ptr_el]
+                    c_it,p_it=cond.iloc[orig_df_idx],tarif.iloc[orig_df_idx]
                     qcomm[orig_df_idx]+=c_it; mt_act+=c_it*p_it
                     idx_ptr_el=(idx_ptr_el+1)%len(elig_incr)
-                if iters>=max_iter_l and mt_act<montant_minimum_input: st.error(f"Ajustement min: Max iter ({max_iter_l}) atteint. Actuel: {mt_act:,.2f}€ / Requis: {montant_minimum_input:,.2f}€.") # Shortened
-        qcomm_fin_s=pd.Series(qcomm,index=df_calc.index); mt_fin=(qcomm_fin_s*tarif).sum() # Shortened
+                if iters>=max_iter_l and mt_act<montant_minimum_input: st.error(f"Ajustement min: Max iter ({max_iter_l}) atteint. Actuel: {mt_act:,.2f}€ / Requis: {montant_minimum_input:,.2f}€.")
+        qcomm_fin_s=pd.Series(qcomm,index=df_calc.index); mt_fin=(qcomm_fin_s*tarif).sum()
         return(qcomm,ventes_N1,v12N1,v12last,mt_fin)
-    except KeyError as e:st.error(f"Err clé (calcul qtés): '{e}'.");logging.exception(f"KeyError in calc_qte_cmd: {e}");return None # Shortened
-    except Exception as e:st.error(f"Err inattendue (calcul qtés): {type(e).__name__} - {e}");logging.exception("Exception in calc_qte_cmd:");return None # Shortened
+    except KeyError as e:st.error(f"Err clé (calcul qtés): '{e}'.");logging.exception(f"KeyError in calc_qte_cmd: {e}");return None
+    except Exception as e:st.error(f"Err inattendue (calcul qtés): {type(e).__name__} - {e}");logging.exception("Exception in calc_qte_cmd:");return None
 
 def calculer_rotation_stock(df,semaine_columns,periode_semaines):
     try:
         if not isinstance(df,pd.DataFrame)or df.empty:st.info("Aucune donnée pour analyse rotation.");return pd.DataFrame()
-        req_cols=["Stock","Tarif d'achat"];miss_cols=[c for c in req_cols if c not in df.columns] # Shortened
+        req_cols=["Stock","Tarif d'achat"];miss_cols=[c for c in req_cols if c not in df.columns]
         if miss_cols:st.error(f"Cols manquantes (rotation): {', '.join(miss_cols)}");return None
-        df_rot=df.copy() # Shortened
-        if periode_semaines and periode_semaines>0 and len(semaine_columns)>=periode_semaines:sem_an,nb_sem_an=semaine_columns[-periode_semaines:],periode_semaines # Shortened
-        elif periode_semaines and periode_semaines>0:sem_an,nb_sem_an=semaine_columns,len(semaine_columns);st.caption(f"Période analyse ajustée à {nb_sem_an} sem.") # Shortened
-        else:sem_an,nb_sem_an=semaine_columns,len(semaine_columns) # Shortened
+        df_rot=df.copy()
+        if periode_semaines and periode_semaines>0 and len(semaine_columns)>=periode_semaines:sem_an,nb_sem_an=semaine_columns[-periode_semaines:],periode_semaines
+        elif periode_semaines and periode_semaines>0:sem_an,nb_sem_an=semaine_columns,len(semaine_columns);st.caption(f"Période analyse ajustée à {nb_sem_an} sem.")
+        else:sem_an,nb_sem_an=semaine_columns,len(semaine_columns)
         if not sem_an:
             st.warning("Aucune col vente pour analyse rotation.")
             metric_cols=["Unités Vendues (Période)","Ventes Moy Hebdo (Période)","Ventes Moy Mensuel (Période)","Semaines Stock (WoS)","Rotation Unités (Proxy)","COGS (Période)","Valeur Stock Actuel (€)","Rotation Valeur (Proxy)"]
@@ -156,16 +144,16 @@ def calculer_rotation_stock(df,semaine_columns,periode_semaines):
         df_rot["Ventes Moy Mensuel (Période)"]=df_rot["Ventes Moy Hebdo (Période)"]*(52/12.0)
         df_rot["Stock"]=pd.to_numeric(df_rot["Stock"],errors='coerce').fillna(0)
         df_rot["Tarif d'achat"]=pd.to_numeric(df_rot["Tarif d'achat"],errors='coerce').fillna(0)
-        den_wos=df_rot["Ventes Moy Hebdo (Période)"] # Shortened
+        den_wos=df_rot["Ventes Moy Hebdo (Période)"]
         df_rot["Semaines Stock (WoS)"]=np.divide(df_rot["Stock"],den_wos,out=np.full_like(df_rot["Stock"],np.inf,dtype=np.float64),where=den_wos!=0)
         df_rot.loc[df_rot["Stock"]<=0,"Semaines Stock (WoS)"]=0.0
-        den_rot_u=df_rot["Stock"] # Shortened
+        den_rot_u=df_rot["Stock"]
         df_rot["Rotation Unités (Proxy)"]=np.divide(df_rot["Unités Vendues (Période)"],den_rot_u,out=np.full_like(den_rot_u,np.inf,dtype=np.float64),where=den_rot_u!=0)
         df_rot.loc[(df_rot["Unités Vendues (Période)"]<=0)&(den_rot_u<=0),"Rotation Unités (Proxy)"]=0.0
         df_rot.loc[(df_rot["Unités Vendues (Période)"]<=0)&(den_rot_u>0),"Rotation Unités (Proxy)"]=0.0
         df_rot["COGS (Période)"]=df_rot["Unités Vendues (Période)"]*df_rot["Tarif d'achat"]
         df_rot["Valeur Stock Actuel (€)"]=df_rot["Stock"]*df_rot["Tarif d'achat"]
-        den_rot_v=df_rot["Valeur Stock Actuel (€)"] # Shortened
+        den_rot_v=df_rot["Valeur Stock Actuel (€)"]
         df_rot["Rotation Valeur (Proxy)"]=np.divide(df_rot["COGS (Période)"],den_rot_v,out=np.full_like(den_rot_v,np.inf,dtype=np.float64),where=den_rot_v!=0)
         df_rot.loc[(df_rot["COGS (Période)"]<=0)&(den_rot_v<=0),"Rotation Valeur (Proxy)"]=0.0
         df_rot.loc[(df_rot["COGS (Période)"]<=0)&(den_rot_v>0),"Rotation Valeur (Proxy)"]=0.0
@@ -173,13 +161,13 @@ def calculer_rotation_stock(df,semaine_columns,periode_semaines):
     except KeyError as e:st.error(f"Err clé (rotation): '{e}'.");logging.exception(f"KeyError in calc_rotation: {e}");return None
     except Exception as e:st.error(f"Err inattendue (rotation): {type(e).__name__} - {e}");logging.exception("Error in calc_rotation:");return None
 
-def approx_weeks_to_months(week_cols_52): # Shortened
-    m_map={}; # Shortened
+def approx_weeks_to_months(week_cols_52):
+    m_map={};
     if not week_cols_52 or len(week_cols_52)!=52:logging.warning(f"approx_weeks_to_months expects 52 cols, got {len(week_cols_52)if week_cols_52 else 0}.");return m_map
-    w_p_m_approx=52/12.0 # Shortened
+    w_p_m_approx=52/12.0
     for i in range(1,13):
-        m_name=calendar.month_name[i]; # Shortened
-        s_idx=int(round((i-1)*w_p_m_approx));e_idx=int(round(i*w_p_m_approx)) # Shortened
+        m_name=calendar.month_name[i];
+        s_idx=int(round((i-1)*w_p_m_approx));e_idx=int(round(i*w_p_m_approx))
         m_map[m_name]=week_cols_52[s_idx:min(e_idx,52)]
     logging.info(f"Approx month map. Jan: {m_map.get('January',[])}");return m_map
 
@@ -247,10 +235,7 @@ def calculer_forecast_simulation_v3(df, all_semaine_columns, selected_months, si
             if total_n1_units_all<=0:
                 st.warning("Ventes N-1 nulles. Répartition égale du montant objectif.")
                 num_sel_m=len(selected_months)
-                if num_sel_m == 0: # Corrected Syntax
-                    logging.warning("calculer_forecast_simulation_v3: selected_months est devenu vide.")
-                    return None, 0.0
-                
+                if num_sel_m == 0: logging.warning("calc_fcst_sim_v3: selected_months empty."); return None, 0.0 # Corrected Syntax
                 target_amt_p_m=objectif_montant/num_sel_m
                 num_items_price=(df_sim["Tarif d'achat"]>0).sum()
                 for m_name in selected_months:
@@ -431,7 +416,7 @@ if 'df_initial_filtered'in st.session_state and isinstance(st.session_state.df_i
     tab_titles=["Prévision Commande","Analyse Rotation Stock","Vérification Stock","Simulation Forecast","Suivi Commandes Fourn."]
     tab1,tab2,tab3,tab4,tab5=st.tabs(tab_titles)
 
-    with tab1:
+    with tab1: # Prévision Commande
         st.header("Prévision des Quantités à Commander")
         sel_f_t1=render_supplier_checkboxes("tab1",all_sups_data,default_select_all=True)
         df_disp_t1=pd.DataFrame()
@@ -443,29 +428,88 @@ if 'df_initial_filtered'in st.session_state and isinstance(st.session_state.df_i
         elif not id_sem_cols and not df_disp_t1.empty:st.warning("Colonnes ventes non identifiées.")
         elif not df_disp_t1.empty:
             st.markdown("#### Paramètres Calcul Commande")
-            c1_c,c2_c=st.columns(2);
-            with c1_c:d_s_c=st.number_input("⏳ Couverture (sem.)",1,260,4,1,key="d_s_c_t1")
-            with c2_c:m_m_c=st.number_input("💶 Montant min (€)",0.0,value=0.0,step=50.0,format="%.2f",key="m_m_c_t1")
+            # Create 3 columns for parameters
+            col1_params, col2_params, col3_params = st.columns(3)
+            with col1_params: d_s_c=st.number_input("⏳ Couverture (sem.)",1,260,4,1,key="d_s_c_t1")
+            with col2_params: m_m_c=st.number_input("💶 Montant min (€)",0.0,value=0.0,step=50.0,format="%.2f",key="m_m_c_t1")
+            # NEW: Percentage increase input - only enabled if 1 supplier is selected
+            with col3_params:
+                increase_percentage = st.number_input(
+                    label="📈 Augmentation Cmd (%)",
+                    min_value=0.0,
+                    value=0.0, # Default to 0
+                    step=1.0,
+                    format="%.1f",
+                    key="increase_pct_t1",
+                    help="Appliquer une augmentation % aux quantités calculées. Actif uniquement si UN SEUL fournisseur est sélectionné.",
+                    disabled=len(sel_f_t1) != 1 # Disable if not exactly one supplier
+                )
+
             if st.button("🚀 Calculer Qtés Cmd",key="calc_q_c_b_t1"):
                 with st.spinner("Calcul qtés..."):res_c=calculer_quantite_a_commander(df_disp_t1,id_sem_cols,m_m_c,d_s_c)
                 if res_c:
-                    st.success("✅ Calcul qtés OK.");q_c,vN1,v12N1,v12l,m_c=res_c
+                    st.success("✅ Calcul qtés initial OK.")
+                    q_c,vN1,v12N1,v12l,m_c_initial=res_c # Initial calculated amount
                     df_r_c=df_disp_t1.copy();df_r_c["Qte Cmdée"]=q_c
                     df_r_c["Vts N-1 Total (calc)"]=vN1;df_r_c["Vts 12 N-1 Sim (calc)"]=v12N1;df_r_c["Vts 12 Dern. (calc)"]=v12l
                     df_r_c["Tarif Ach."]=pd.to_numeric(df_r_c["Tarif d'achat"],errors='coerce').fillna(0)
-                    df_r_c["Total Cmd (€)"]=df_r_c["Tarif Ach."]*df_r_c["Qte Cmdée"]
-                    df_r_c["Stock Terme"]=df_r_c["Stock"]+df_r_c["Qte Cmdée"]
-                    st.session_state.commande_result_df=df_r_c;st.session_state.commande_calculated_total_amount=m_c
-                    st.session_state.commande_suppliers_calculated_for=sel_f_t1;st.rerun()
+
+                    # --- NEW: Apply percentage increase if applicable ---
+                    m_c_final = m_c_initial # Start with initial amount
+                    if len(sel_f_t1) == 1 and increase_percentage > 0:
+                        st.info(f"Application d'une augmentation de {increase_percentage:.1f}% pour {sel_f_t1[0]}...")
+                        try:
+                            modified_count = 0
+                            for index in df_r_c.index:
+                                current_qty = df_r_c.loc[index, "Qte Cmdée"]
+                                if current_qty > 0:
+                                    cond = df_r_c.loc[index, "Conditionnement"]
+                                    if cond <= 0: cond = 1 # Safety check, should be handled earlier
+
+                                    target_qty = current_qty * (1 + increase_percentage / 100.0)
+                                    new_qty = int(np.ceil(target_qty / cond) * cond)
+                                    
+                                    # Ensure it doesn't decrease (unlikely but safe) and update if changed
+                                    final_new_qty = max(current_qty, new_qty)
+                                    if final_new_qty != current_qty:
+                                        df_r_c.loc[index, "Qte Cmdée"] = final_new_qty
+                                        modified_count += 1
+                            
+                            # Recalculate dependent columns after potential increase
+                            df_r_c["Total Cmd (€)"] = df_r_c["Tarif Ach."] * df_r_c["Qte Cmdée"]
+                            df_r_c["Stock Terme"] = df_r_c["Stock"] + df_r_c["Qte Cmdée"]
+                            m_c_final = df_r_c["Total Cmd (€)"].sum() # Recalculate the final total amount
+                            st.success(f"✅ Augmentation appliquée sur {modified_count} article(s). Montant final: {m_c_final:,.2f} €")
+
+                        except Exception as e_increase:
+                            st.error(f"Erreur lors de l'application de l'augmentation: {e_increase}")
+                            # Revert to original calculations if increase fails? Or keep partial? Keep partial for now.
+                            # Recalculate just in case, based on potentially partially modified df
+                            df_r_c["Total Cmd (€)"] = df_r_c["Tarif Ach."] * df_r_c["Qte Cmdée"]
+                            df_r_c["Stock Terme"] = df_r_c["Stock"] + df_r_c["Qte Cmdée"]
+                            m_c_final = df_r_c["Total Cmd (€)"].sum()
+                    else:
+                        # Calculate totals even if no increase applied
+                        df_r_c["Total Cmd (€)"] = df_r_c["Tarif Ach."] * df_r_c["Qte Cmdée"]
+                        df_r_c["Stock Terme"] = df_r_c["Stock"] + df_r_c["Qte Cmdée"]
+                    # --- End NEW ---
+
+                    # Store final results (potentially modified)
+                    st.session_state.commande_result_df=df_r_c
+                    st.session_state.commande_calculated_total_amount=m_c_final # Store the final amount
+                    st.session_state.commande_suppliers_calculated_for=sel_f_t1
+                    st.rerun()
                 else:st.error("❌ Calcul qtés échoué.")
+
+            # Display results section (uses final amount from session state)
             if st.session_state.commande_result_df is not None and st.session_state.commande_suppliers_calculated_for==sel_f_t1:
                 st.markdown("---");st.markdown("#### Résultats Prévision Commande")
-                df_c_d=st.session_state.commande_result_df;m_c_d=st.session_state.commande_calculated_total_amount;s_c_d=st.session_state.commande_suppliers_calculated_for
-                st.metric(label="💰 Montant Total Cmd",value=f"{m_c_d:,.2f} €")
+                df_c_d=st.session_state.commande_result_df; m_c_d=st.session_state.commande_calculated_total_amount; s_c_d=st.session_state.commande_suppliers_calculated_for
+                st.metric(label="💰 Montant Total Cmd Final",value=f"{m_c_d:,.2f} €") # Use final amount
                 if len(s_c_d)==1:
                     s_s=s_c_d[0]
                     if s_s in min_o_amts:
-                        r_m_s=min_o_amts[s_s];a_t_s=df_c_d[df_c_d["Fournisseur"]==s_s]["Total Cmd (€)"].sum()
+                        r_m_s=min_o_amts[s_s]; a_t_s=df_c_d[df_c_d["Fournisseur"]==s_s]["Total Cmd (€)"].sum() # Use final amount
                         if r_m_s>0 and a_t_s<r_m_s:st.warning(f"⚠️ Min non atteint ({s_s}): {a_t_s:,.2f}€ / Requis: {r_m_s:,.2f}€ (Manque: {r_m_s-a_t_s:,.2f}€)")
                 cols_s_c=["Fournisseur","AF_RefFourniss","Référence Article","Désignation Article","Stock","Vts N-1 Total (calc)","Vts 12 N-1 Sim (calc)","Vts 12 Dern. (calc)","Conditionnement","Qte Cmdée","Stock Terme","Tarif Ach.","Total Cmd (€)"]
                 disp_c_c=[c for c in cols_s_c if c in df_c_d.columns]
@@ -473,10 +517,12 @@ if 'df_initial_filtered'in st.session_state and isinstance(st.session_state.df_i
                 else:
                     fmts_c={"Tarif Ach.":"{:,.2f}€","Total Cmd (€)":"{:,.2f}€","Vts N-1 Total (calc)":"{:,.0f}","Vts 12 N-1 Sim (calc)":"{:,.0f}","Vts 12 Dern. (calc)":"{:,.0f}","Stock":"{:,.0f}","Conditionnement":"{:,.0f}","Qte Cmdée":"{:,.0f}","Stock Terme":"{:,.0f}"}
                     st.dataframe(df_c_d[disp_c_c].style.format(fmts_c,na_rep="-",thousands=","))
+
+                # Export section (uses final df_c_d from session state)
                 st.markdown("#### Export Commandes")
-                df_e_c=df_c_d[df_c_d["Qte Cmdée"]>0].copy()
+                df_e_c=df_c_d[df_c_d["Qte Cmdée"]>0].copy() # Export based on final quantities
                 if not df_e_c.empty:
-                    out_b_c=io.BytesIO();shts_c=0
+                    out_b_c=io.BytesIO(); shts_c=0
                     try:
                         with pd.ExcelWriter(out_b_c,engine="openpyxl") as writer_c:
                             exp_c_s_c=[c for c in disp_c_c if c!='Fournisseur']
@@ -490,22 +536,23 @@ if 'df_initial_filtered'in st.session_state and isinstance(st.session_state.df_i
                                 if not df_s_e.empty:
                                     df_w_s=df_s_e[exp_c_s_c].copy();n_r=len(df_w_s);s_nm=sanitize_sheet_name(sup_e)
                                     try:
-                                        df_w_s.to_excel(writer_c,sheet_name=s_nm,index=False)
+                                        df_w_s.to_excel(writer_c,sheet_name=s_nm,index=False) # Write data first
                                         ws=writer_c.sheets[s_nm]
                                         cmd_col_fmts={"Stock":"#,##0","Vts N-1 Total (calc)":"#,##0","Vts 12 N-1 Sim (calc)":"#,##0","Vts 12 Dern. (calc)":"#,##0","Conditionnement":"#,##0","Qte Cmdée":"#,##0","Stock Terme":"#,##0","Tarif Ach.":"#,##0.00€"}
-                                        format_excel_sheet(ws,df_w_s,column_formats=cmd_col_fmts)
-                                        if f_ok and n_r>0:
+                                        format_excel_sheet(ws,df_w_s,column_formats=cmd_col_fmts) # Format based on data
+                                        if f_ok and n_r>0: # Apply formulas
                                             for r_idx in range(2,n_r+2):cell_t=ws[f"{t_l}{r_idx}"];cell_t.value=f"={q_l}{r_idx}*{p_l}{r_idx}";cell_t.number_format='#,##0.00€'
+                                        # Add summary rows manually
                                         lbl_c_s_idx=exp_c_s_c.index("Désignation Article"if"Désignation Article"in exp_c_s_c else(exp_c_s_c[1]if len(exp_c_s_c)>1 else exp_c_s_c[0]))+1
                                         tot_v_s=df_w_s[t].sum();min_r_s=min_o_amts.get(sup_e,0);min_d_s=f"{min_r_s:,.2f}€"if min_r_s>0 else"N/A"
                                         total_row_xl_idx=n_r+2
-                                        ws[f"{get_column_letter(lbl_c_s_idx)}{total_row_xl_idx}"]="TOTAL";ws[f"{get_column_letter(lbl_c_s_idx)}{total_row_xl_idx}"].font=Font(bold=True)
+                                        ws[f"{get_column_letter(lbl_c_s_idx)}{total_row_xl_idx}"]="TOTAL"; ws[f"{get_column_letter(lbl_c_s_idx)}{total_row_xl_idx}"].font=Font(bold=True)
                                         cell_gt=ws[f"{t_l}{total_row_xl_idx}"]
                                         if n_r>0:cell_gt.value=f"=SUM({t_l}2:{t_l}{n_r+1})"
                                         else:cell_gt.value=tot_v_s
                                         cell_gt.number_format='#,##0.00€';cell_gt.font=Font(bold=True)
                                         min_req_row_xl_idx=n_r+3
-                                        ws[f"{get_column_letter(lbl_c_s_idx)}{min_req_row_xl_idx}"]="Min Requis Fourn.";ws[f"{get_column_letter(lbl_c_s_idx)}{min_req_row_xl_idx}"].font=Font(bold=True)
+                                        ws[f"{get_column_letter(lbl_c_s_idx)}{min_req_row_xl_idx}"]="Min Requis Fourn."; ws[f"{get_column_letter(lbl_c_s_idx)}{min_req_row_xl_idx}"].font=Font(bold=True)
                                         cell_min_req_v=ws[f"{t_l}{min_req_row_xl_idx}"]
                                         cell_min_req_v.value=min_d_s;cell_min_req_v.font=Font(bold=True)
                                         shts_c+=1
@@ -715,12 +762,12 @@ if 'df_initial_filtered'in st.session_state and isinstance(st.session_state.df_i
                                         df_sup_s_exp_d=df_suivi_cmds_all[df_suivi_cmds_all["Fournisseur"]==sup_nm_s_exp].copy()
                                         if df_sup_s_exp_d.empty:logging.info(f"Aucune cmd pour {sup_nm_s_exp}, non ajouté ZIP.");continue
                                         df_exp_fin_s=pd.DataFrame(columns=out_cols_s_exp)
-                                        if'Date Pièce BC'in df_sup_s_exp_d:df_exp_fin_s["Date Pièce BC"]=pd.to_datetime(df_sup_s_exp_d["Date Pièce BC"],errors='coerce') # Keep datetime for excel formatting
+                                        if'Date Pièce BC'in df_sup_s_exp_d:df_exp_fin_s["Date Pièce BC"]=pd.to_datetime(df_sup_s_exp_d["Date Pièce BC"],errors='coerce')
                                         for col_map in["N° de pièce","AF_RefFourniss","Désignation Article","Qté Commandées"]:
                                             if col_map in df_sup_s_exp_d:df_exp_fin_s[col_map]=df_sup_s_exp_d[col_map]
                                         df_exp_fin_s["Date de livraison prévue"]=""
                                         excel_buf_ind=io.BytesIO()
-                                        with pd.ExcelWriter(excel_buf_ind,engine="openpyxl")as writer_ind: # Removed date_format/datetime_format for openpyxl, handle with cell format
+                                        with pd.ExcelWriter(excel_buf_ind,engine="openpyxl")as writer_ind:
                                             df_to_w=df_exp_fin_s[out_cols_s_exp].copy()
                                             sheet_nm=sanitize_sheet_name(f"Suivi_{sup_nm_s_exp}")
                                             df_to_w.to_excel(writer_ind,sheet_name=sheet_nm,index=False)
