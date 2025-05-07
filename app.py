@@ -59,6 +59,7 @@ def format_excel_sheet(worksheet, df, column_formats={}, freeze_header=True, def
         elif pd.api.types.is_integer_dtype(col_dtype): num_fmt_apply=default_int_format
         elif pd.api.types.is_float_dtype(col_dtype): num_fmt_apply=default_float_format
         elif pd.api.types.is_datetime64_any_dtype(col_dtype)or(not df[col_name].empty and isinstance(df[col_name].dropna().iloc[0]if not df[col_name].dropna().empty else None,pd.Timestamp)): num_fmt_apply=default_date_format
+        # worksheet.max_row below refers to rows written by initial df.to_excel
         for row_idx in range(2,worksheet.max_row+1):
             cell=worksheet[f"{col_letter}{row_idx}"]; cell.alignment=data_alignment
             if num_fmt_apply and not str(cell.value).startswith('='):
@@ -414,12 +415,13 @@ if 'df_initial_filtered'in st.session_state and isinstance(st.session_state.df_i
                 df_c_d=st.session_state.commande_result_df; m_c_d=st.session_state.commande_calculated_total_amount; s_c_d=st.session_state.commande_suppliers_calculated_for
                 if st.session_state.get('commande_increase_applied',False): st.caption(f"ℹ️ _Augmentation de {st.session_state.get('commande_increase_pct',0.0):.1f}% appliquée au besoin._")
                 st.metric(label="💰 Montant Total Cmd Final",value=f"{m_c_d:,.2f} €")
-                if len(s_c_d)==1:
+                if len(s_c_d)==1: # Section vérification minimum corrigée
                     s_s=s_c_d[0]
-                    if s_s in min_o_amts: # Corrected: Check if supplier has min order defined
-                        r_m_s=min_o_amts[s_s]; a_t_s=df_c_d[df_c_d["Fournisseur"]==s_s]["Total Cmd (€)"].sum()
-                        if r_m_s > 0 and a_t_s < r_m_s: # Indented correctly
-                             st.warning(f"⚠️ Min non atteint ({s_s}): {a_t_s:,.2f}€ / Requis: {r_m_s:,.2f}€ (Manque: {r_m_s-a_t_s:,.2f}€)")
+                    if s_s in min_o_amts:
+                        r_m_s=min_o_amts[s_s];
+                        a_t_s=df_c_d[df_c_d["Fournisseur"]==s_s]["Total Cmd (€)"].sum()
+                        if r_m_s > 0 and a_t_s < r_m_s: # Indentation correcte
+                            st.warning(f"⚠️ Min non atteint ({s_s}): {a_t_s:,.2f}€ / Requis: {r_m_s:,.2f}€ (Manque: {r_m_s-a_t_s:,.2f}€)")
                 cols_s_c=["Fournisseur","AF_RefFourniss","Référence Article","Désignation Article","Stock","Vts N-1 Total (calc)","Vts 12 N-1 Sim (calc)","Vts 12 Dern. (calc)","Conditionnement","Qte Cmdée","Stock Terme","Tarif Ach.","Total Cmd (€)"]
                 disp_c_c=[c for c in cols_s_c if c in df_c_d.columns]
                 if not disp_c_c:st.error("Aucune col à afficher (cmd).")
@@ -430,10 +432,13 @@ if 'df_initial_filtered'in st.session_state and isinstance(st.session_state.df_i
                     out_b_c=io.BytesIO(); shts_c=0
                     try:
                         with pd.ExcelWriter(out_b_c,engine="openpyxl") as writer_c:
-                            exp_c_s_c=[c for c in disp_c_c if c!='Fournisseur']; q,p,t="Qte Cmdée","Tarif Ach.","Total Cmd (€)"; f_ok=False
-                            if all(c in exp_c_s_c for c in[q,p,t]):
-                                try: q_l,p_l,t_l=get_column_letter(exp_c_s_c.index(q)+1),get_column_letter(exp_c_s_c.index(p)+1),get_column_letter(exp_c_s_c.index(t)+1); f_ok=True
-                                except ValueError: pass
+                            exp_c_s_c=[c for c in disp_c_c if c!='Fournisseur']; q,p,t="Qte Cmdée","Tarif Ach.","Total Cmd (€)"; f_ok=False; q_l,p_l,t_l=None,None,None
+                            if t in exp_c_s_c: # Check if total col exists first
+                                try: t_l=get_column_letter(exp_c_s_c.index(t)+1)
+                                except ValueError: t_l = None # Should not happen if t in exp_c_s_c
+                            if all(c in exp_c_s_c for c in[q,p]) and t_l is not None: # Check if q and p also exist
+                                try: q_l=get_column_letter(exp_c_s_c.index(q)+1); p_l=get_column_letter(exp_c_s_c.index(p)+1); f_ok=True # Formula possible
+                                except ValueError: f_ok=False # Q or P missing
                             for sup_e in s_c_d:
                                 df_s_e=df_e_c[df_e_c["Fournisseur"]==sup_e]
                                 if not df_s_e.empty:
@@ -442,17 +447,21 @@ if 'df_initial_filtered'in st.session_state and isinstance(st.session_state.df_i
                                         df_w_s.to_excel(writer_c,sheet_name=s_nm,index=False); ws=writer_c.sheets[s_nm]
                                         cmd_col_fmts={"Stock":"#,##0","Vts N-1 Total (calc)":"#,##0","Vts 12 N-1 Sim (calc)":"#,##0","Vts 12 Dern. (calc)":"#,##0","Conditionnement":"#,##0","Qte Cmdée":"#,##0","Stock Terme":"#,##0","Tarif Ach.":"#,##0.00€"}
                                         format_excel_sheet(ws,df_w_s,column_formats=cmd_col_fmts)
-                                        if f_ok and n_r>0:
-                                            for r_idx in range(2,n_r+2): cell_t=ws[f"{t_l}{r_idx}"];cell_t.value=f"={q_l}{r_idx}*{p_l}{r_idx}";cell_t.number_format='#,##0.00€'
+                                        if t_l and n_r>0: # Apply formulas/values only if total column exists
+                                            for r_idx in range(2,n_r+2):
+                                                cell_t=ws[f"{t_l}{r_idx}"]
+                                                if f_ok: cell_t.value=f"={q_l}{r_idx}*{p_l}{r_idx}"; cell_t.number_format='#,##0.00€'
+                                                # else: keep the value from df_w_s, already formatted by format_excel_sheet
                                         lbl_c_s_idx=exp_c_s_c.index("Désignation Article"if"Désignation Article"in exp_c_s_c else(exp_c_s_c[1]if len(exp_c_s_c)>1 else exp_c_s_c[0]))+1
-                                        tot_v_s=df_w_s[t].sum(); min_r_s=min_o_amts.get(sup_e,0); min_d_s=f"{min_r_s:,.2f}€"if min_r_s>0 else"N/A"
+                                        tot_v_s=df_w_s[t].sum() if t in df_w_s.columns else 0; min_r_s=min_o_amts.get(sup_e,0); min_d_s=f"{min_r_s:,.2f}€"if min_r_s>0 else"N/A"
                                         total_row_xl_idx=n_r+2; ws[f"{get_column_letter(lbl_c_s_idx)}{total_row_xl_idx}"]="TOTAL"; ws[f"{get_column_letter(lbl_c_s_idx)}{total_row_xl_idx}"].font=Font(bold=True)
-                                        cell_gt=ws[f"{t_l}{total_row_xl_idx}"]
-                                        if n_r>0: cell_gt.value=f"=SUM({t_l}2:{t_l}{n_r+1})"
-                                        else: cell_gt.value=tot_v_s
-                                        cell_gt.number_format='#,##0.00€'; cell_gt.font=Font(bold=True)
                                         min_req_row_xl_idx=n_r+3; ws[f"{get_column_letter(lbl_c_s_idx)}{min_req_row_xl_idx}"]="Min Requis Fourn."; ws[f"{get_column_letter(lbl_c_s_idx)}{min_req_row_xl_idx}"].font=Font(bold=True)
-                                        cell_min_req_v=ws[f"{t_l}{min_req_row_xl_idx}"]; cell_min_req_v.value=min_d_s; cell_min_req_v.font=Font(bold=True)
+                                        if t_l: # If total column exists
+                                            cell_gt=ws[f"{t_l}{total_row_xl_idx}"]
+                                            if f_ok and n_r>0: cell_gt.value=f"=SUM({t_l}2:{t_l}{n_r+1})"
+                                            else: cell_gt.value=tot_v_s
+                                            cell_gt.number_format='#,##0.00€'; cell_gt.font=Font(bold=True)
+                                            cell_min_req_v=ws[f"{t_l}{min_req_row_xl_idx}"]; cell_min_req_v.value=min_d_s; cell_min_req_v.font=Font(bold=True)
                                         shts_c+=1
                                     except Exception as e_sht: logging.error(f"Err export sheet {s_nm}: {e_sht}")
                         if shts_c>0:
