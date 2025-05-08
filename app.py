@@ -1,4 +1,3 @@
-
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -795,9 +794,10 @@ if uploaded_file and st.session_state.df_full is None:
         else: st.info("Onglet 'Suivi cmds' vide."); st.session_state.df_suivi_commandes = pd.DataFrame()
 
         df_full_state = st.session_state.df_full
+        # CORRECTED LINE FOR '#filter'
         df_init_filt_temp_read = df_full_state[
             (df_full_state["Fournisseur"].astype(str).str.strip() != "") &
-            (df_full_state["Fournisseur"].astype(str).str.strip().lower() != "#filter") &
+            (df_full_state["Fournisseur"].astype(str).str.strip().str.lower() != "#filter") & # APPLIED .str.lower()
             (df_full_state["AF_RefFourniss"].astype(str).str.strip() != "")
         ].copy()
         st.session_state.df_initial_filtered = df_init_filt_temp_read
@@ -809,11 +809,11 @@ if uploaded_file and st.session_state.df_full is None:
             known_non_week_cols_set = set(["Tarif d'achat", "Conditionnement", "Stock", "Total", "Stock à terme", "Ventes N-1", "Ventes 12 semaines identiques N-1", "Ventes 12 dernières semaines", "Quantité à commander", "Fournisseur", "AF_RefFourniss", "Référence Article", "Désignation Article"])
             for col_cand_sem in candidate_cols_sem:
                 if col_cand_sem not in known_non_week_cols_set:
-                    try: # Test if column is mostly numeric-like or can be parsed as a date by our function
+                    try: 
                         if pd.to_numeric(df_full_state[col_cand_sem], errors='coerce').notna().sum() > 0 or \
-                           parse_week_column_to_date(str(col_cand_sem)) is not None: # Check if column name itself is a date
+                           parse_week_column_to_date(str(col_cand_sem)) is not None: 
                             potential_sem_cols_read.append(col_cand_sem)
-                    except Exception: pass # Ignore if not convertible
+                    except Exception: pass 
         st.session_state.all_available_semaine_columns = potential_sem_cols_read
         if not potential_sem_cols_read: st.warning("⚠️ Aucune col vente numérique/datable auto-identifiée.")
         
@@ -1001,7 +1001,7 @@ if 'df_initial_filtered' in st.session_state and isinstance(st.session_state.df_
                         else: logging.info(f"Aucun article pour {sup_name_proc_ai} (IA).")
                     
                     if calc_ok_overall_ai and res_dfs_list_ai_calc:
-                        final_ai_res_df_calc = pd.concat(res_dfs_list_ai_calc, ignore_index=True)
+                        final_ai_res_df_calc = pd.concat(res_dfs_list_ai_calc, ignore_index=True) if res_dfs_list_ai_calc else pd.DataFrame()
                         st.success("✅ Calcul IA terminé pour fournisseurs sélectionnés!")
                         st.session_state.ai_commande_result_df = final_ai_res_df_calc
                         st.session_state.ai_commande_total_amount = total_amt_all_sups_ai_calc
@@ -1010,7 +1010,7 @@ if 'df_initial_filtered' in st.session_state and isinstance(st.session_state.df_
                     else: # Partial success
                         st.warning("Certains calculs IA ont échoué. Résultats partiels affichés.")
                         if res_dfs_list_ai_calc: # If some succeeded
-                            final_ai_res_df_calc = pd.concat(res_dfs_list_ai_calc, ignore_index=True)
+                            final_ai_res_df_calc = pd.concat(res_dfs_list_ai_calc, ignore_index=True) if res_dfs_list_ai_calc else pd.DataFrame()
                             st.session_state.ai_commande_result_df = final_ai_res_df_calc
                             st.session_state.ai_commande_total_amount = total_amt_all_sups_ai_calc
                             st.rerun()
@@ -1106,23 +1106,19 @@ if 'df_initial_filtered' in st.session_state and isinstance(st.session_state.df_
             c1_r_t2,c2_r_t2=st.columns(2);
             with c1_r_t2:
                 p_opts_r_t2={"12 dernières semaines":12,"52 dernières semaines":52,"Total disponible":0}
-                # Persist selection using session state
                 default_period_label_t2 = st.session_state.get('rotation_analysis_period_label', "12 dernières semaines")
-                if default_period_label_t2 not in p_opts_r_t2: default_period_label_t2 = "12 dernières semaines" # Fallback
+                if default_period_label_t2 not in p_opts_r_t2: default_period_label_t2 = "12 dernières semaines"
                 
                 sel_p_lbl_r_t2=st.selectbox("⏳ Période analyse:",list(p_opts_r_t2.keys()), index=list(p_opts_r_t2.keys()).index(default_period_label_t2), key="r_p_sel_ui_t2")
                 sel_p_w_r_t2=p_opts_r_t2[sel_p_lbl_r_t2]
             with c2_r_t2:
                 st.markdown("##### Options Affichage")
                 show_all_r_t2=st.checkbox("Afficher tout",value=st.session_state.show_all_rotation_data,key="show_all_r_ui_cb_t2")
-                
                 r_thr_ui_t2=st.number_input("... ou vts mens. <",0.0,value=st.session_state.rotation_threshold_value,step=0.1,format="%.1f",key="r_thr_ui_numin_t2",disabled=show_all_r_t2)
             
-            # Update session state from UI for persistence, independent of button press
-            st.session_state.rotation_analysis_period_label = sel_p_lbl_r_t2 # Selected label
+            st.session_state.rotation_analysis_period_label = sel_p_lbl_r_t2
             st.session_state.show_all_rotation_data = show_all_r_t2
             if not show_all_r_t2: st.session_state.rotation_threshold_value = r_thr_ui_t2
-
 
             if st.button("🔄 Analyser Rotation",key="analyze_r_btn_t2"):
                 curr_calc_params_t2 = {'suppliers': sel_f_t2, 'period_label': sel_p_lbl_r_t2, 'show_all': show_all_r_t2, 'threshold': r_thr_ui_t2 if not show_all_r_t2 else -1, 'sem_cols_hash': hash(tuple(id_sem_cols))}
@@ -1130,21 +1126,20 @@ if 'df_initial_filtered' in st.session_state and isinstance(st.session_state.df_
                 with st.spinner("Analyse rotation..."):df_r_res_t2=calculer_rotation_stock(df_disp_t2,id_sem_cols,sel_p_w_r_t2)
                 if df_r_res_t2 is not None:
                     st.success("✅ Analyse rotation OK.");st.session_state.rotation_result_df=df_r_res_t2
-                    # No need to set suppliers_calculated_for if using params dict
                     st.rerun()
                 else:st.error("❌ Analyse rotation échouée.")
             
             if st.session_state.rotation_result_df is not None:
                 curr_ui_params_t2_disp = {'suppliers': sel_f_t2, 'period_label': sel_p_lbl_r_t2, 'show_all': show_all_r_t2, 'threshold': r_thr_ui_t2 if not show_all_r_t2 else -1, 'sem_cols_hash': hash(tuple(id_sem_cols))}
                 if st.session_state.get('rotation_params_calculated_for') == curr_ui_params_t2_disp:
-                    st.markdown("---");st.markdown(f"#### Résultats Rotation ({sel_p_lbl_r_t2})") # Use current UI label
+                    st.markdown("---");st.markdown(f"#### Résultats Rotation ({sel_p_lbl_r_t2})") 
                     df_r_orig_t2=st.session_state.rotation_result_df
                     
                     df_r_disp_t2_final=pd.DataFrame();df_r_to_fmt_t2_final=pd.DataFrame()
                     if df_r_orig_t2.empty:st.info("Aucune donnée rotation à afficher.")
                     elif show_all_r_t2:
                         df_r_disp_t2_final=df_r_orig_t2.copy();df_r_to_fmt_t2_final=df_r_disp_t2_final.copy();st.caption(f"Affichage {len(df_r_disp_t2_final)} articles.")
-                    else: # Apply filter
+                    else: 
                         m_sales_c_r_t2="Ventes Moy Mensuel (Période)"
                         if m_sales_c_r_t2 in df_r_orig_t2.columns:
                             try:
@@ -1167,7 +1162,7 @@ if 'df_initial_filtered' in st.session_state and isinstance(st.session_state.df_
                         st.dataframe(df_d_cp_r_t2.style.format(fmts_r_t2,na_rep="-",thousands=","))
                         
                         st.markdown("#### Export Analyse Affichée")
-                        if not df_r_to_fmt_t2_final.empty: # Use the df intended for export
+                        if not df_r_to_fmt_t2_final.empty: 
                             out_b_r_t2_exp=io.BytesIO();df_e_r_t2_exp=df_r_to_fmt_t2_final[disp_c_r_t2].copy()
                             lbl_e_r_t2=f"Filtree_{r_thr_ui_t2:.1f}"if not show_all_r_t2 else"Complete";sh_nm_r_t2=sanitize_sheet_name(f"Rotation_{lbl_e_r_t2}");f_base_r_t2=f"analyse_rotation_{lbl_e_r_t2}"
                             sup_e_nm_r_t2='multi'if len(sel_f_t2)>1 else(sanitize_sheet_name(sel_f_t2[0])if sel_f_t2 else'NA')
@@ -1195,7 +1190,7 @@ if 'df_initial_filtered' in st.session_state and isinstance(st.session_state.df_
             stock_c_neg_t3="Stock"
             if stock_c_neg_t3 not in df_full_neg_t3.columns:st.error(f"Colonne '{stock_c_neg_t3}' non trouvée.")
             else:
-                df_neg_res_t3=df_full_neg_t3[pd.to_numeric(df_full_neg_t3[stock_c_neg_t3], errors='coerce').fillna(0)<0].copy() # Ensure numeric comparison
+                df_neg_res_t3=df_full_neg_t3[pd.to_numeric(df_full_neg_t3[stock_c_neg_t3], errors='coerce').fillna(0)<0].copy() 
                 if df_neg_res_t3.empty:st.success("✅ Aucun stock négatif.")
                 else:
                     st.warning(f"⚠️ **{len(df_neg_res_t3)} article(s) avec stock négatif !**")
@@ -1203,11 +1198,9 @@ if 'df_initial_filtered' in st.session_state and isinstance(st.session_state.df_
                     disp_cols_neg_t3=[c for c in cols_neg_show_t3 if c in df_neg_res_t3.columns]
                     if not disp_cols_neg_t3:st.error("Cols manquantes affichage négatifs.")
                     else:
-                        # Apply styling to highlight negative stock values
                         def highlight_negative(s):
                             is_negative = pd.to_numeric(s, errors='coerce') < 0
                             return ['background-color: #FADBD8' if v else '' for v in is_negative]
-
                         st.dataframe(df_neg_res_t3[disp_cols_neg_t3].style.format({stock_c_neg_t3:"{:,.0f}"},na_rep="-").apply(highlight_negative, subset=[stock_c_neg_t3], axis=0))
                     
                     st.markdown("---");st.markdown("#### Exporter Stocks Négatifs")
@@ -1240,7 +1233,6 @@ if 'df_initial_filtered' in st.session_state and isinstance(st.session_state.df_
             sel_m_f_ui_t4=st.multiselect("📅 Mois simulation:",all_cal_m_t4,default=st.session_state.forecast_selected_months_ui,key="f_m_sel_ui_t4")
             
             sim_t_opts_f_t4=('Simple Progression','Objectif Montant')
-            # Persist radio button choice
             current_sim_type_index_t4 = st.session_state.get('forecast_sim_type_radio_index', 0)
             sim_t_f_ui_t4=st.radio("⚙️ Type Simulation:",sim_t_opts_f_t4,horizontal=True,index=current_sim_type_index_t4,key="f_sim_t_ui_t4")
             
@@ -1253,7 +1245,6 @@ if 'df_initial_filtered' in st.session_state and isinstance(st.session_state.df_
                 if sim_t_f_ui_t4=='Objectif Montant':
                     obj_mt_f_t4=st.number_input("🎯 Objectif (€) (mois sel.)",0.0,value=st.session_state.forecast_target_amount_ui,step=1000.0,format="%.2f",key="f_target_amt_ui_t4")
 
-            # Update session state for UI persistence
             st.session_state.forecast_selected_months_ui = sel_m_f_ui_t4
             st.session_state.forecast_sim_type_radio_index = sim_t_opts_f_t4.index(sim_t_f_ui_t4)
             if sim_t_f_ui_t4=='Simple Progression': st.session_state.forecast_progression_percentage_ui = prog_pct_f_t4
@@ -1278,7 +1269,7 @@ if 'df_initial_filtered' in st.session_state and isinstance(st.session_state.df_
                     if df_f_disp_t4.empty:st.info("Aucun résultat simulation.")
                     else:
                         fmts_f_t4={"Tarif d'achat":"{:,.2f}€","Conditionnement":"{:,.0f}"}
-                        for m_disp_t4 in sel_m_f_ui_t4: # Use currently selected months for formatting
+                        for m_disp_t4 in sel_m_f_ui_t4: 
                             if f"Ventes N-1 {m_disp_t4}"in df_f_disp_t4.columns:fmts_f_t4[f"Ventes N-1 {m_disp_t4}"]="{:,.0f}"
                             if f"Qté Prév. {m_disp_t4}"in df_f_disp_t4.columns:fmts_f_t4[f"Qté Prév. {m_disp_t4}"]="{:,.0f}"
                             if f"Montant Prév. {m_disp_t4} (€)"in df_f_disp_t4.columns:fmts_f_t4[f"Montant Prév. {m_disp_t4} (€)"]="{:,.2f}€"
@@ -1297,7 +1288,7 @@ if 'df_initial_filtered' in st.session_state and isinstance(st.session_state.df_
                                 df_e_f_t4_exp.to_excel(w_f_t4,sheet_name=sheet_name_fcst_t4,index=False)
                                 ws_f_t4=w_f_t4.sheets[sheet_name_fcst_t4]
                                 fcst_col_fmts_t4={"Tarif d'achat":"#,##0.00€","Conditionnement":"#,##0"}
-                                for m_disp_t4_exp in sel_m_f_ui_t4: # Use currently selected months for formats
+                                for m_disp_t4_exp in sel_m_f_ui_t4: 
                                     if f"Ventes N-1 {m_disp_t4_exp}"in df_e_f_t4_exp.columns:fcst_col_fmts_t4[f"Ventes N-1 {m_disp_t4_exp}"]="#,##0"
                                     if f"Qté Prév. {m_disp_t4_exp}"in df_e_f_t4_exp.columns:fcst_col_fmts_t4[f"Qté Prév. {m_disp_t4_exp}"]="#,##0"
                                     if f"Montant Prév. {m_disp_t4_exp} (€)"in df_e_f_t4_exp.columns:fcst_col_fmts_t4[f"Montant Prév. {m_disp_t4_exp} (€)"]="#,##0.00€"
@@ -1340,19 +1331,16 @@ if 'df_initial_filtered' in st.session_state and isinstance(st.session_state.df_
                                         df_sup_s_exp_d_t5=df_suivi_cmds_all[df_suivi_cmds_all["Fournisseur"]==sup_nm_s_exp_t5].copy()
                                         if df_sup_s_exp_d_t5.empty:logging.info(f"Aucune cmd pour {sup_nm_s_exp_t5}, non ajouté ZIP.");continue
                                         
-                                        df_exp_fin_s_t5=pd.DataFrame(columns=out_cols_s_exp_t5) # Initialize with target columns
-                                        # Map existing data to target columns
+                                        df_exp_fin_s_t5=pd.DataFrame(columns=out_cols_s_exp_t5) 
                                         if 'Date Pièce BC' in df_sup_s_exp_d_t5:df_exp_fin_s_t5["Date Pièce BC"]=pd.to_datetime(df_sup_s_exp_d_t5["Date Pièce BC"],errors='coerce')
                                         for col_map_t5 in ["N° de pièce","AF_RefFourniss","Désignation Article","Qté Commandées"]:
                                             if col_map_t5 in df_sup_s_exp_d_t5:df_exp_fin_s_t5[col_map_t5]=df_sup_s_exp_d_t5[col_map_t5]
-                                        df_exp_fin_s_t5["Date de livraison prévue"]="" # Placeholder, to be filled by user
+                                        df_exp_fin_s_t5["Date de livraison prévue"]="" 
                                         
                                         excel_buf_ind_t5=io.BytesIO()
                                         with pd.ExcelWriter(excel_buf_ind_t5,engine="openpyxl")as writer_ind_t5:
-                                            # Ensure only existing columns from out_cols_s_exp_t5 are written
                                             cols_to_write_suivi = [c for c in out_cols_s_exp_t5 if c in df_exp_fin_s_t5.columns]
                                             df_to_w_t5=df_exp_fin_s_t5[cols_to_write_suivi].copy()
-
                                             sheet_nm_t5=sanitize_sheet_name(f"Suivi_{sup_nm_s_exp_t5}")
                                             df_to_w_t5.to_excel(writer_ind_t5,sheet_name=sheet_nm_t5,index=False)
                                             ws_t5=writer_ind_t5.sheets[sheet_nm_t5]
@@ -1374,13 +1362,10 @@ if 'df_initial_filtered' in st.session_state and isinstance(st.session_state.df_
 elif not uploaded_file:
     st.info("👋 Bienvenue ! Chargez votre fichier Excel principal pour démarrer.")
     if st.button("🔄 Réinitialiser l'Application"):
-        # Clear all session state keys to ensure a clean slate
         for k_reset in list(st.session_state.keys()): del st.session_state[k_reset]
-        # Re-initialize with defaults to be safe
         for key_reinit, val_reinit in get_default_session_state().items(): st.session_state[key_reinit] = val_reinit
         st.rerun()
 elif 'df_initial_filtered' in st.session_state and not isinstance(st.session_state.df_initial_filtered, pd.DataFrame):
-    # This case should ideally not be reached if df_initial_filtered is always initialized as a DataFrame
     st.error("Erreur interne : Données filtrées invalides. Veuillez recharger le fichier.")
-    st.session_state.df_full = None # Trigger re-upload possibility
+    st.session_state.df_full = None 
     if st.button("Réessayer de charger"): st.rerun()
