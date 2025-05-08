@@ -1,3 +1,4 @@
+
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -98,18 +99,14 @@ def format_excel_sheet(worksheet, df, column_formats={}, freeze_header=True, def
     header_alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
     data_alignment = Alignment(vertical="center")
 
-    # Format Header Row (Row 1)
     for cell in worksheet[1]:
         cell.font = header_font
         cell.fill = header_fill
         cell.alignment = header_alignment
 
-    # Iterate through columns for width and data formatting
     for idx, col_name in enumerate(df.columns):
         col_letter = get_column_letter(idx + 1)
         num_format_to_apply = None
-
-        # Adjust Column Width
         try:
             header_length = len(str(col_name))
             non_na_series = df[col_name].dropna()
@@ -124,13 +121,12 @@ def format_excel_sheet(worksheet, df, column_formats={}, freeze_header=True, def
 
             data_length = data_length if pd.notna(data_length) else 0
             current_max_len = max(header_length, data_length) + 3
-            final_width = min(max(current_max_len, 10), 50) # Min 10, Max 50 width
+            final_width = min(max(current_max_len, 10), 50)
             worksheet.column_dimensions[col_letter].width = final_width
         except Exception as e_width:
             logging.warning(f"Could not automatically set width for column {col_name}: {e_width}")
-            worksheet.column_dimensions[col_letter].width = 15 # Default width on error
+            worksheet.column_dimensions[col_letter].width = 15
 
-        # Determine Number Format
         specific_format = column_formats.get(col_name)
         try:
             col_dtype = df[col_name].dtype
@@ -148,17 +144,15 @@ def format_excel_sheet(worksheet, df, column_formats={}, freeze_header=True, def
              (not df[col_name].empty and isinstance(df[col_name].dropna().iloc[0] if not df[col_name].dropna().empty else None, pd.Timestamp)):
             num_format_to_apply = default_date_format
 
-        # Apply Format and Alignment to Data Cells (Rows 2 onwards)
         for row_idx in range(2, worksheet.max_row + 1):
             cell = worksheet[f"{col_letter}{row_idx}"]
-            cell.alignment = data_alignment # Apply default vertical alignment
+            cell.alignment = data_alignment
             if num_format_to_apply and cell.value is not None and not str(cell.value).startswith('='):
                 try:
                     cell.number_format = num_format_to_apply
                 except Exception as e_format_cell:
                     logging.warning(f"Could not apply format '{num_format_to_apply}' to cell {col_letter}{row_idx} for column {col_name}: {e_format_cell}")
 
-    # Freeze Header Row
     if freeze_header:
         worksheet.freeze_panes = worksheet['A2']
 
@@ -680,10 +674,15 @@ def ai_calculate_order_quantities(df_products_for_ai, historical_semaine_cols, n
     df_calc_ai["Forecast Ventes (IA)"] = 0.0
 
     num_prods = len(df_calc_ai)
+    # Note: Progress bar update within the loop might slow down significantly for large datasets.
+    # Consider updating less frequently if performance is an issue.
     progress_bar_placeholder = st.empty()
 
     for i, (prod_idx, prod_row) in enumerate(df_calc_ai.iterrows()):
+        # Update progress bar less frequently if needed
+        # if i % 10 == 0 or i == num_prods - 1: # Update every 10 items or on the last item
         progress_bar_placeholder.progress((i + 1) / num_prods, text=f"Prévision IA: Article {i+1}/{num_prods}")
+
         prod_ref_log = prod_row.get("Référence Article", f"Index {prod_idx}")
         logging.info(f"Prévision IA pour: {prod_ref_log}")
 
@@ -701,7 +700,7 @@ def ai_calculate_order_quantities(df_products_for_ai, historical_semaine_cols, n
 
             with SuppressStdoutStderr(): model_prophet.fit(prod_ts_df_fit[['ds', 'y']].dropna(subset=['y']))
 
-            future_df = model_prophet.make_future_dataframe(periods=num_forecast_weeks, freq='W-MON') # Use W-MON for Monday freq
+            future_df = model_prophet.make_future_dataframe(periods=num_forecast_weeks, freq='W-MON')
             forecast_df_res = model_prophet.predict(future_df)
             total_fcst_period = forecast_df_res['yhat'].iloc[-num_forecast_weeks:].sum()
             total_fcst_period = max(0, total_fcst_period)
@@ -771,7 +770,6 @@ st.title("📦 Application Prévision Commande, Analyse Rotation & Suivi")
 uploaded_file = st.file_uploader("📁 Charger le fichier Excel principal", type=["xlsx", "xls"], key="main_file_uploader")
 
 def get_default_session_state():
-    # Initialize session state keys with default values
     return {
         'df_full': None, 'min_order_dict': {}, 'df_initial_filtered': pd.DataFrame(),
         'all_available_semaine_columns': [], 'unique_suppliers_list': [],
@@ -1033,10 +1031,10 @@ if 'df_initial_filtered' in st.session_state and isinstance(st.session_state.df_
                     df_disp_t1_ai = df_base_tabs[df_base_tabs["Fournisseur"].isin(sel_f_t1_ai)].copy()
                     st.caption(f"{len(df_disp_t1_ai)} art. / {len(sel_f_t1_ai)} fourn.")
 
-            # Display current stock value for selection
+            # --- Display Current Stock Value ---
             if sel_f_t1_ai and not df_disp_t1_ai.empty:
                 try:
-                    # Use double quotes for column names with spaces or special chars
+                    # Use double quotes for column names with special characters or spaces
                     stock_actuel_selection_ai = pd.to_numeric(df_disp_t1_ai["Stock"], errors='coerce').fillna(0)
                     tarif_achat_selection_ai = pd.to_numeric(df_disp_t1_ai["Tarif d'achat"], errors='coerce').fillna(0)
                     valeur_stock_selection_ai = (stock_actuel_selection_ai * tarif_achat_selection_ai).sum()
@@ -1047,6 +1045,7 @@ if 'df_initial_filtered' in st.session_state and isinstance(st.session_state.df_
                     st.error(f"Erreur calcul valeur stock actuel : {e_stockval_calc}")
             elif sel_f_t1_ai and df_disp_t1_ai.empty:
                  st.metric(label="📊 Valeur Stock Actuel (€) (Fourn. Sél.)", value="0,00 €")
+            # --- End Display Current Stock Value ---
             else:
                 st.info("Sélectionner fournisseur(s).")
 
@@ -1093,20 +1092,17 @@ if 'df_initial_filtered' in st.session_state and isinstance(st.session_state.df_
                     st.session_state.ai_commande_params_calculated_for = curr_calc_params_t1_ai
 
                     res_dfs_list_ai_calc = []
-                    total_amt_all_sups_ai_calc = 0.0
                     calc_ok_overall_ai = True
                     st.info(f"Lancement prévision IA pour {len(sel_f_t1_ai)} fournisseur(s)...")
 
                     # --- Calculation Loop ---
                     for sup_idx_ai, sup_name_proc_ai in enumerate(sel_f_t1_ai):
-                        # Placeholder for potential progress update within loop
-                        # st.caption(f"Traitement IA: {sup_name_proc_ai} ({sup_idx_ai+1}/{len(sel_f_t1_ai)})...")
+                        # Progress update can be shown here if needed
                         df_sup_subset_ai_proc = df_disp_t1_ai[df_disp_t1_ai["Fournisseur"] == sup_name_proc_ai].copy()
-
                         sup_specific_min_order_ai = min_amt_ai_t1 if len(sel_f_t1_ai) == 1 else min_o_amts.get(sup_name_proc_ai, 0.0)
 
                         if not df_sup_subset_ai_proc.empty:
-                            ai_res_df_sup, ai_total_amt_sup = ai_calculate_order_quantities(
+                            ai_res_df_sup, _ = ai_calculate_order_quantities( # Ignore amount returned here, recalc later
                                 df_sup_subset_ai_proc,
                                 id_sem_cols,
                                 fcst_w_ai_t1,
@@ -1114,8 +1110,6 @@ if 'df_initial_filtered' in st.session_state and isinstance(st.session_state.df_
                             )
                             if ai_res_df_sup is not None:
                                 res_dfs_list_ai_calc.append(ai_res_df_sup)
-                                # Note: total_amt_all_sups_ai_calc accumulates amount *before* stock reduction filter
-                                # final total amount will be recalculated later from the adjusted DataFrame
                             else:
                                 st.error(f"Échec calcul IA pour: {sup_name_proc_ai}")
                                 calc_ok_overall_ai = False
@@ -1134,9 +1128,15 @@ if 'df_initial_filtered' in st.session_state and isinstance(st.session_state.df_
                         st.info("Application du filtre : Commandes fournisseur < 350€ ignorées (sauf si article en stock < 0).")
                         df_after_350_filter = pd.DataFrame()
                         if not final_ai_res_df_calc.empty:
+                            # Ensure Total Cmd is numeric before grouping
+                            final_ai_res_df_calc['Total Cmd (€) (IA)'] = pd.to_numeric(final_ai_res_df_calc['Total Cmd (€) (IA)'], errors='coerce').fillna(0)
+                            final_ai_res_df_calc['Qté Cmdée (IA)'] = pd.to_numeric(final_ai_res_df_calc['Qté Cmdée (IA)'], errors='coerce').fillna(0)
+                            final_ai_res_df_calc['Stock'] = pd.to_numeric(final_ai_res_df_calc['Stock'], errors='coerce').fillna(0)
+
                             order_value_per_supplier = final_ai_res_df_calc[final_ai_res_df_calc['Qté Cmdée (IA)'] > 0].groupby('Fournisseur')['Total Cmd (€) (IA)'].sum()
                             suppliers_with_neg_stock_ordered = final_ai_res_df_calc[(final_ai_res_df_calc['Qté Cmdée (IA)'] > 0) & (final_ai_res_df_calc['Stock'] < 0)]['Fournisseur'].unique()
                             suppliers_to_keep = set(s for s, v in order_value_per_supplier.items() if v >= 350 or s in suppliers_with_neg_stock_ordered)
+
                             initial_rows_350 = len(final_ai_res_df_calc)
                             df_after_350_filter = final_ai_res_df_calc[final_ai_res_df_calc['Fournisseur'].isin(suppliers_to_keep)].copy()
                             filtered_rows_350 = len(df_after_350_filter)
@@ -1144,7 +1144,7 @@ if 'df_initial_filtered' in st.session_state and isinstance(st.session_state.df_
                         else:
                              df_after_350_filter = final_ai_res_df_calc
 
-                        # --- Apply Stock Reduction Filter ---
+                        # --- Apply Stock Reduction Filter (Low Rotation Strategy) ---
                         df_after_reduction_filter = df_after_350_filter.copy()
                         reduction_target_value = st.session_state.ai_stock_reduc_target_val
 
@@ -1175,9 +1175,11 @@ if 'df_initial_filtered' in st.session_state and isinstance(st.session_state.df_
                                 st.error(f"Erreur calcul WoS: {e_wos}"); df_after_reduction_filter['WoS_Calculated'] = np.inf
 
                             # Ensure other columns are numeric
-                            for col in ['Tarif d'achat', 'Qté Cmdée (IA)', 'Conditionnement', 'Stock']: # Include Stock again just in case
+                            # --- Corrected Line (Using double quotes) ---
+                            for col in ["Tarif d'achat", "Qté Cmdée (IA)", "Conditionnement", "Stock"]:
                                 if col in df_after_reduction_filter.columns:
                                     df_after_reduction_filter[col] = pd.to_numeric(df_after_reduction_filter[col], errors='coerce').fillna(0)
+                            # --- End Correction ---
                             df_after_reduction_filter['Conditionnement'] = df_after_reduction_filter['Conditionnement'].apply(lambda x: int(x) if x > 0 else 1)
                             df_after_reduction_filter['Qté Cmdée (IA)'] = df_after_reduction_filter['Qté Cmdée (IA)'].astype(int)
 
@@ -1194,16 +1196,14 @@ if 'df_initial_filtered' in st.session_state and isinstance(st.session_state.df_
                                 candidates_reduc = df_after_reduction_filter[df_after_reduction_filter['Qté Cmdée (IA)'] > 0].copy()
 
                                 if not candidates_reduc.empty:
-                                    # Sort by WoS (ascending=False means highest WoS first)
                                     candidates_reduc.sort_values(by='WoS_Calculated', ascending=False, inplace=True, na_position='first')
                                     value_reduced_total = 0.0
-                                    max_loops_reduc = len(candidates_reduc) * 10 # Limit loops to avoid excess cycling
+                                    max_loops_reduc = len(candidates_reduc) * 10
                                     loops_count_reduc = 0
                                     candidate_indices_reduc = candidates_reduc.index.tolist()
 
-                                    # Modify main DF directly using indices
                                     while value_to_reduce_reduc > 0.01 and loops_count_reduc < max_loops_reduc:
-                                        made_reduction_this_pass = False # Track if any reduction happened in a full pass
+                                        made_reduction_this_pass = False
                                         for item_index_reduc in candidate_indices_reduc:
                                             loops_count_reduc += 1
                                             if value_to_reduce_reduc <= 0.01 or loops_count_reduc >= max_loops_reduc: break
@@ -1214,30 +1214,28 @@ if 'df_initial_filtered' in st.session_state and isinstance(st.session_state.df_
 
                                             if packaging_reduc > 0 and price_reduc > 0 and current_qty_reduc >= packaging_reduc:
                                                 value_per_pkg_reduc = packaging_reduc * price_reduc
-                                                # Only reduce if it helps significantly and doesn't massively overshoot
-                                                if value_to_reduce_reduc >= value_per_pkg_reduc * 0.5: # Be less strict about overshooting
+                                                if value_to_reduce_reduc >= value_per_pkg_reduc * 0.5:
                                                     df_after_reduction_filter.loc[item_index_reduc, 'Qté Cmdée (IA)'] -= packaging_reduc
                                                     value_to_reduce_reduc -= value_per_pkg_reduc
                                                     value_reduced_total += value_per_pkg_reduc
                                                     made_reduction_this_pass = True
                                                     logging.debug(f"Réduit Qty index {item_index_reduc} (WoS: {df_after_reduction_filter.loc[item_index_reduc, 'WoS_Calculated']:.1f}) by {packaging_reduc}. Reste: {value_to_reduce_reduc:.2f}€")
-                                                    # Check immediately if target met after this reduction
                                                     if value_to_reduce_reduc <= 0.01: break
 
-                                        if not made_reduction_this_pass or loops_count_reduc >= max_loops_reduc : # Exit if a full pass made no reduction or max loops reached
-                                            break
+                                        if not made_reduction_this_pass or loops_count_reduc >= max_loops_reduc :
+                                            break # Exit outer loop if no progress or max loops
 
                                     st.caption(f"Réduction appliquée: {value_reduced_total:,.2f}€ retirés de la commande.")
                                     if value_to_reduce_reduc > 0.01: st.warning(f"Objectif réduction non atteint. Reste {value_to_reduce_reduc:,.2f}€ excédent.")
 
-                                    # Recalculate final derived columns after potential reductions
+                                    # Recalculate final derived columns
                                     df_after_reduction_filter['Total Cmd (€) (IA)'] = df_after_reduction_filter['Qté Cmdée (IA)'] * df_after_reduction_filter['Tarif d'achat']
                                     df_after_reduction_filter['Stock Terme (IA)'] = df_after_reduction_filter['Stock'] + df_after_reduction_filter['Qté Cmdée (IA)']
                                 else:
                                     st.caption("Aucun article commandé trouvé pour appliquer la réduction.")
                             else:
                                 st.caption("Aucune réduction nécessaire pour objectif stock.")
-                        else: # No reduction target or DF empty after 350 filter
+                        else:
                             st.caption("Pas d'objectif de réduction de stock spécifié ou pas de données après filtre 350€.")
                         # --- End Stock Reduction Filter ---
 
@@ -1253,11 +1251,15 @@ if 'df_initial_filtered' in st.session_state and isinstance(st.session_state.df_
                         st.session_state.ai_commande_total_amount = 0.0
                     else: # Partial success
                         st.warning("Certains calculs IA ont échoué. Filtre 350€ appliqué, filtre réduction stock non appliqué sur résultats partiels.")
-                        # Apply only 350 filter for partial results
                         df_after_350_filter = pd.DataFrame()
                         if res_dfs_list_ai_calc:
                            final_ai_res_df_calc = pd.concat(res_dfs_list_ai_calc, ignore_index=True) if res_dfs_list_ai_calc else pd.DataFrame()
                            if not final_ai_res_df_calc.empty:
+                               # Ensure numeric before processing
+                               final_ai_res_df_calc['Total Cmd (€) (IA)'] = pd.to_numeric(final_ai_res_df_calc['Total Cmd (€) (IA)'], errors='coerce').fillna(0)
+                               final_ai_res_df_calc['Qté Cmdée (IA)'] = pd.to_numeric(final_ai_res_df_calc['Qté Cmdée (IA)'], errors='coerce').fillna(0)
+                               final_ai_res_df_calc['Stock'] = pd.to_numeric(final_ai_res_df_calc['Stock'], errors='coerce').fillna(0)
+
                                order_value_per_supplier = final_ai_res_df_calc[final_ai_res_df_calc['Qté Cmdée (IA)'] > 0].groupby('Fournisseur')['Total Cmd (€) (IA)'].sum()
                                suppliers_with_neg_stock_ordered = final_ai_res_df_calc[(final_ai_res_df_calc['Qté Cmdée (IA)'] > 0) & (final_ai_res_df_calc['Stock'] < 0)]['Fournisseur'].unique()
                                suppliers_to_keep = set(s for s, v in order_value_per_supplier.items() if v >= 350 or s in suppliers_with_neg_stock_ordered)
@@ -1287,18 +1289,17 @@ if 'df_initial_filtered' in st.session_state and isinstance(st.session_state.df_
                         st.metric(label="💰 Montant Total Cmd Final (€) (IA)", value=f"{total_amt_ai_res_final:,.2f} €")
 
                         if not df_disp_ai_res_final.empty:
-                            # Ensure columns are numeric before final calculation
+                            # Ensure numeric for final display calculation
                             df_disp_ai_res_final['Stock'] = pd.to_numeric(df_disp_ai_res_final['Stock'], errors='coerce').fillna(0)
                             df_disp_ai_res_final['Qté Cmdée (IA)'] = pd.to_numeric(df_disp_ai_res_final['Qté Cmdée (IA)'], errors='coerce').fillna(0)
                             df_disp_ai_res_final['Tarif d'achat'] = pd.to_numeric(df_disp_ai_res_final['Tarif d'achat'], errors='coerce').fillna(0)
-                            
                             final_proj_stock_value = ((df_disp_ai_res_final['Stock'] + df_disp_ai_res_final['Qté Cmdée (IA)']) * df_disp_ai_res_final['Tarif d'achat']).sum()
                             st.metric(label="📊 Valeur Stock Projeté Final (€) (Articles Commandés)", value=f"{final_proj_stock_value:,.2f} €")
 
                         for sup_chk_min_ai in sel_f_t1_ai:
                             sup_min_cfg_val_ai = min_o_amts.get(sup_chk_min_ai, 0.0)
                             min_applied_in_calc_ai = min_amt_ai_t1 if len(sel_f_t1_ai) == 1 else sup_min_cfg_val_ai
-                            if min_applied_in_calc_ai > 0:
+                            if min_applied_in_calc_ai > 0 and not df_disp_ai_res_final.empty: # Check if DF not empty
                                 actual_order_sup_ai = df_disp_ai_res_final[(df_disp_ai_res_final["Fournisseur"] == sup_chk_min_ai)]["Total Cmd (€) (IA)"].sum()
                                 if actual_order_sup_ai < min_applied_in_calc_ai:
                                     st.warning(f"⚠️ Min cmd pour {sup_chk_min_ai} ({min_applied_in_calc_ai:,.2f}€) non atteint ({actual_order_sup_ai:,.2f}€) - *peut être dû à la réduction de stock*.")
@@ -1319,7 +1320,7 @@ if 'df_initial_filtered' in st.session_state and isinstance(st.session_state.df_
                                 st.info("Aucune quantité à commander après application des filtres et objectifs.")
                             elif not df_display_ordered_only.empty :
                                 df_display_styled = df_display_ordered_only[disp_cols_ai_final].copy()
-                                if 'WoS_Calculated' in df_display_styled: df_display_styled['WoS_Calculated'] = df_display_styled['WoS_Calculated'].replace([np.inf, -np.inf], ">999") # Handle Inf for display
+                                if 'WoS_Calculated' in df_display_styled: df_display_styled['WoS_Calculated'] = df_display_styled['WoS_Calculated'].replace([np.inf, -np.inf], ">999")
                                 st.dataframe(df_display_styled.style.format(fmts_ai_final,na_rep="-",thousands=","))
                             else:
                                 st.dataframe(df_disp_ai_res_final[disp_cols_ai_final].style.format(fmts_ai_final,na_rep="-",thousands=","))
@@ -1344,9 +1345,8 @@ if 'df_initial_filtered' in st.session_state and isinstance(st.session_state.df_
                                         df_s_e_ai_dl=df_exp_ai_final_dl[df_exp_ai_final_dl["Fournisseur"]==sup_e_ai_dl]
 
                                         df_w_s_ai_dl=df_s_e_ai_dl[exp_cols_sheet_ai_dl].copy()
-                                        # Handle potential Inf in WoS for Excel export
                                         if 'WoS_Calculated' in df_w_s_ai_dl.columns:
-                                            df_w_s_ai_dl['WoS_Calculated'] = df_w_s_ai_dl['WoS_Calculated'].replace([np.inf, -np.inf], 9999) # Or None
+                                            df_w_s_ai_dl['WoS_Calculated'] = df_w_s_ai_dl['WoS_Calculated'].replace([np.inf, -np.inf], 9999)
 
                                         n_r_ai_dl=len(df_w_s_ai_dl);s_nm_ai_dl=sanitize_sheet_name(f"IA_Cmd_{sup_e_ai_dl}")
                                         df_w_s_ai_dl.to_excel(writer_ai_exp_dl,sheet_name=s_nm_ai_dl,index=False)
