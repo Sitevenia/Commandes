@@ -1,4 +1,4 @@
-# --- START OF FINAL COMPLETE CORRECTED app.py (v9 - Definition Order) ---
+# --- START OF FINAL COMPLETE CORRECTED app.py (v10 - Definition Order Fixed) ---
 
 import streamlit as st
 import pandas as pd
@@ -43,7 +43,7 @@ class SuppressStdoutStderr:
             except Exception: pass
         sys.stderr = self.old_stderr
 
-# --- HELPER FUNCTIONS DEFINITIONS (should be before main app logic) ---
+# --- ALL HELPER FUNCTIONS DEFINITIONS ---
 
 def safe_read_excel(uploaded_file, sheet_name, **kwargs):
     try:
@@ -144,7 +144,7 @@ def calculer_quantite_a_commander(df, semaine_columns, montant_minimum_input, du
                 while mt_act<montant_minimum_input and iters<max_iter_l:
                     iters+=1; orig_df_idx_pos=elig_incr[idx_ptr_el]
                     c_it,p_it=cond.iloc[orig_df_idx_pos],tarif.iloc[orig_df_idx_pos]
-                    if c_it > 0 and p_it > 0: # Ensure valid values before incrementing
+                    if c_it > 0 and p_it > 0:
                         qcomm[orig_df_idx_pos]+=c_it; mt_act+=c_it*p_it
                     idx_ptr_el=(idx_ptr_el+1)%len(elig_incr)
                 if iters>=max_iter_l and mt_act<montant_minimum_input: st.error(f"Ajustement min: Max iter ({max_iter_l}) atteint. Actuel: {mt_act:,.2f}€ / Requis: {montant_minimum_input:,.2f}€.")
@@ -154,7 +154,6 @@ def calculer_quantite_a_commander(df, semaine_columns, montant_minimum_input, du
     except Exception as e:st.error(f"Err inattendue (calcul qtés): {type(e).__name__} - {e}");logging.exception("Exception in calc_qte_cmd:");return None
 
 def calculer_rotation_stock(df, semaine_columns, periode_semaines_analyse):
-    # ... (Fonction identique) ...
     try:
         if not isinstance(df, pd.DataFrame) or df.empty: st.info("Aucune donnée pour analyse rotation."); return pd.DataFrame()
         req_cols=["Stock","Tarif d'achat"]; miss_cols=[c for c in req_cols if c not in df.columns]
@@ -170,7 +169,7 @@ def calculer_rotation_stock(df, semaine_columns, periode_semaines_analyse):
             return df_rot
         for col in sem_an:
             if col in df_rot.columns: df_rot[col]=pd.to_numeric(df_rot[col],errors='coerce').fillna(0)
-            else: df_rot[col] = 0.0 # If col not found (e.g. due to filtering), create it with 0
+            else: df_rot[col] = 0.0
         df_rot["Unités Vendues (Période)"]=df_rot[[c for c in sem_an if c in df_rot.columns]].sum(axis=1)
         df_rot["Ventes Moy Hebdo (Période)"]=df_rot["Unités Vendues (Période)"]/nb_sem_an if nb_sem_an>0 else 0.0
         df_rot["Ventes Moy Mensuel (Période)"]=df_rot["Ventes Moy Hebdo (Période)"]*(52/12.0)
@@ -194,7 +193,6 @@ def calculer_rotation_stock(df, semaine_columns, periode_semaines_analyse):
     except Exception as e:st.error(f"Err inattendue (rotation): {type(e).__name__} - {e}");logging.exception("Error in calc_rotation:");return None
 
 def approx_weeks_to_months(week_cols_52_names):
-    # ... (Fonction identique) ...
     month_map = {}
     if not week_cols_52_names or len(week_cols_52_names) != 52:
         logging.warning(f"approx_weeks_to_months expects 52 week col names, got {len(week_cols_52_names) if week_cols_52_names else 0}.")
@@ -213,7 +211,6 @@ def approx_weeks_to_months(week_cols_52_names):
     return month_map
 
 def calculer_forecast_simulation_v3(df, all_historical_semaine_columns, selected_months_list, sim_type_str, progression_pct_val=0, objectif_montant_val=0):
-    # ... (Fonction identique) ...
     try:
         if not isinstance(df, pd.DataFrame) or df.empty: st.warning("Aucune donnée pour simu forecast."); return None,0.0
         if not all_historical_semaine_columns or len(all_historical_semaine_columns)<52: st.error("Données histo. < 52 sem. pour N-1."); return None,0.0
@@ -359,7 +356,6 @@ def calculate_supplier_evaluation_and_targets(df_products, all_sales_cols, globa
     logging.info(f"Évaluation fournisseur (CA Achat) calculée: {len(supplier_data)} fournisseurs.")
     return supplier_data
 
-# --- AI Helper Functions ---
 def parse_week_column_to_date(col_name_str):
     if not isinstance(col_name_str, str): col_name_str = str(col_name_str)
     match_sw = re.match(r"(\d{4})[SW](\d{1,2})", col_name_str, re.IGNORECASE)
@@ -457,7 +453,7 @@ def ai_calculate_order_quantities(df_products_for_ai, historical_semaine_cols, n
     df_calc_ai["Stock Terme (IA)"] = df_calc_ai["Stock"] + df_calc_ai["Qté Cmdée (IA)"]
     return df_calc_ai, current_total_amount_ia
 
-# --- Streamlit App ---
+# --- Streamlit App UI ---
 st.set_page_config(page_title="Forecast & Rotation App", layout="wide")
 st.title("📦 Application Prévision Commande, Analyse Rotation & Suivi")
 uploaded_file = st.file_uploader("📁 Charger le fichier Excel principal", type=["xlsx", "xls"], key="main_file_uploader")
@@ -822,16 +818,13 @@ if 'df_initial_filtered' in st.session_state and isinstance(st.session_state.df_
                             for col_num_350 in ['Total Cmd (€) (IA)', 'Qté Cmdée (IA)', 'Stock']:
                                 if col_num_350 in df_before_350_filter.columns:
                                      df_before_350_filter[col_num_350] = pd.to_numeric(df_before_350_filter[col_num_350], errors='coerce').fillna(0)
-
                             order_value_per_supplier = df_before_350_filter[df_before_350_filter['Qté Cmdée (IA)'] > 0].groupby('Fournisseur')['Total Cmd (€) (IA)'].sum()
                             suppliers_with_neg_stock_ordered = df_before_350_filter[(df_before_350_filter['Qté Cmdée (IA)'] > 0) & (df_before_350_filter['Stock'] < 0)]['Fournisseur'].unique()
                             suppliers_to_keep = set(s for s, v in order_value_per_supplier.items() if v >= 350 or s in suppliers_with_neg_stock_ordered)
-
                             initial_rows_350 = len(df_before_350_filter)
                             df_after_350_filter = df_before_350_filter[df_before_350_filter['Fournisseur'].isin(suppliers_to_keep)].copy()
                             filtered_rows_350 = len(df_after_350_filter)
                             if initial_rows_350 > filtered_rows_350: st.caption(f"{initial_rows_350 - filtered_rows_350} lignes article (< 350€ sans stock négatif) retirées.")
-
                             ignored_indices = df_before_350_filter.index.difference(df_after_350_filter.index)
                             df_ignored_orders_raw = df_before_350_filter.loc[ignored_indices].copy()
                             if not df_ignored_orders_raw.empty:
@@ -844,44 +837,30 @@ if 'df_initial_filtered' in st.session_state and isinstance(st.session_state.df_
                              st.session_state.ai_ignored_orders_df = pd.DataFrame()
 
                         # --- AJUSTEMENT POUR OBJECTIF STOCK MAX FOURNISSEUR ---
-                        df_final_after_all_filters = df_after_350_filter.copy() # Start with 350€ filtered result
-
+                        df_final_after_all_filters = df_after_350_filter.copy()
                         if st.session_state.supplier_evaluation_data and not df_final_after_all_filters.empty:
                             st.markdown("---")
-                            st.info("Ajustement des commandes pour respecter les objectifs de valeur de stock max par fournisseur (basé sur CA Achat).")
-                            
+                            st.info("Ajustement des commandes pour respecter les objectifs de valeur de stock max par fournisseur.")
                             suppliers_in_current_command = df_final_after_all_filters['Fournisseur'].unique()
                             df_all_items_for_selected_suppliers = df_disp_t1_ai[df_disp_t1_ai['Fournisseur'].isin(suppliers_in_current_command)].copy()
-
 
                             for supplier_name_adj in suppliers_in_current_command:
                                 supplier_target_data = st.session_state.supplier_evaluation_data.get(supplier_name_adj)
                                 if not supplier_target_data or 'max_stock_target' not in supplier_target_data:
                                     logging.warning(f"Pas de données d'objectif stock pour fournisseur {supplier_name_adj}."); continue
-
                                 max_stock_target_for_supplier = supplier_target_data['max_stock_target']
-                                
                                 df_supplier_all_items_current = df_all_items_for_selected_suppliers[df_all_items_for_selected_suppliers['Fournisseur'] == supplier_name_adj]
                                 if df_supplier_all_items_current.empty: continue
-
-                                current_stock_value_supplier = (pd.to_numeric(df_supplier_all_items_current['Stock'], errors='coerce').fillna(0) * \
-                                                               pd.to_numeric(df_supplier_all_items_current["Tarif d'achat"], errors='coerce').fillna(0)).sum()
-                                
+                                current_stock_value_supplier = (pd.to_numeric(df_supplier_all_items_current['Stock'], errors='coerce').fillna(0) * pd.to_numeric(df_supplier_all_items_current["Tarif d'achat"], errors='coerce').fillna(0)).sum()
                                 df_supplier_command_items_adj = df_final_after_all_filters[df_final_after_all_filters['Fournisseur'] == supplier_name_adj].copy()
                                 if df_supplier_command_items_adj.empty: continue
-
                                 for col_num in ['Stock', "Tarif d'achat", 'Qté Cmdée (IA)', 'Conditionnement']:
-                                    if col_num in df_supplier_command_items_adj.columns:
-                                        df_supplier_command_items_adj[col_num] = pd.to_numeric(df_supplier_command_items_adj[col_num], errors='coerce').fillna(0)
+                                    if col_num in df_supplier_command_items_adj.columns: df_supplier_command_items_adj[col_num] = pd.to_numeric(df_supplier_command_items_adj[col_num], errors='coerce').fillna(0)
                                 df_supplier_command_items_adj['Conditionnement'] = df_supplier_command_items_adj['Conditionnement'].apply(lambda x: int(x) if x > 0 else 1)
                                 df_supplier_command_items_adj['Qté Cmdée (IA)'] = df_supplier_command_items_adj['Qté Cmdée (IA)'].astype(int)
-
-                                projected_stock_value_supplier = current_stock_value_supplier + \
-                                                                (df_supplier_command_items_adj['Qté Cmdée (IA)'] * df_supplier_command_items_adj["Tarif d'achat"]).sum()
-                                
+                                projected_stock_value_supplier = current_stock_value_supplier + (df_supplier_command_items_adj['Qté Cmdée (IA)'] * df_supplier_command_items_adj["Tarif d'achat"]).sum()
                                 value_to_reduce_from_supplier_cmd = max(0, projected_stock_value_supplier - max_stock_target_for_supplier)
-                                st.caption(f"Fourn: {supplier_name_adj} | Val.Stk Act: {current_stock_value_supplier:,.0f}€ | Val.Stk Proj: {projected_stock_value_supplier:,.0f}€ | Cible Max: {max_stock_target_for_supplier:,.0f}€ | A Reduire Cmd: {value_to_reduce_from_supplier_cmd:,.0f}€")
-
+                                st.caption(f"Fourn: {supplier_name_adj} | Val.Stk Act: {current_stock_value_supplier:,.0f}€ | Val.Stk Proj (avant ajust.): {projected_stock_value_supplier:,.0f}€ | Cible Max: {max_stock_target_for_supplier:,.0f}€ | A Reduire Cmd: {value_to_reduce_from_supplier_cmd:,.0f}€")
                                 if value_to_reduce_from_supplier_cmd > 0.01:
                                     wos_period_weeks = 12; available_weeks = len(id_sem_cols)
                                     weeks_to_use_for_wos_supplier = min(wos_period_weeks, available_weeks)
@@ -894,47 +873,38 @@ if 'df_initial_filtered' in st.session_state and isinstance(st.session_state.df_
                                             current_stock_item_wos = item_row_wos['Stock']
                                             if avg_weekly_sales_item > 0: df_supplier_command_items_adj.loc[item_idx_wos, 'WoS_Calculated_Supplier'] = current_stock_item_wos / avg_weekly_sales_item
                                             elif current_stock_item_wos <= 0: df_supplier_command_items_adj.loc[item_idx_wos, 'WoS_Calculated_Supplier'] = 0.0
-                                    
                                     candidates_reduc_supplier = df_supplier_command_items_adj[df_supplier_command_items_adj['Qté Cmdée (IA)'] > 0].copy()
                                     if not candidates_reduc_supplier.empty:
                                         candidates_reduc_supplier.sort_values(by='WoS_Calculated_Supplier', ascending=False, inplace=True, na_position='first')
                                         value_reduced_supplier_total = 0.0
                                         max_loops_reduc_sup = len(candidates_reduc_supplier) * 10; loops_count_reduc_sup = 0
-                                        
                                         for item_index_reduc_sup in candidates_reduc_supplier.index:
                                             if value_to_reduce_from_supplier_cmd <= 0.01 or loops_count_reduc_sup >= max_loops_reduc_sup: break
-                                            
                                             current_qty_reduc_sup = df_final_after_all_filters.loc[item_index_reduc_sup, 'Qté Cmdée (IA)']
                                             packaging_reduc_sup = df_final_after_all_filters.loc[item_index_reduc_sup, 'Conditionnement']
                                             price_reduc_sup = df_final_after_all_filters.loc[item_index_reduc_sup, "Tarif d'achat"]
-
                                             if packaging_reduc_sup > 0 and price_reduc_sup > 0 and current_qty_reduc_sup >= packaging_reduc_sup:
                                                 value_per_pkg_reduc_sup = packaging_reduc_sup * price_reduc_sup
-                                                
                                                 num_pkgs_can_reduce = int(current_qty_reduc_sup / packaging_reduc_sup)
                                                 num_pkgs_to_reduce_ideal = int(value_to_reduce_from_supplier_cmd / value_per_pkg_reduc_sup) if value_per_pkg_reduc_sup > 0 else 0
-                                                num_pkgs_actually_reduce = min(num_pkgs_can_reduce, num_pkgs_to_reduce_ideal, 1 if value_to_reduce_from_supplier_cmd >= value_per_pkg_reduc_sup *0.5 else 0) # Réduit au moins 1 si possible
-                                                
+                                                num_pkgs_actually_reduce = min(num_pkgs_can_reduce, num_pkgs_to_reduce_ideal) # Réduit au maximum possible pour atteindre l'objectif
                                                 if num_pkgs_actually_reduce > 0 :
                                                     qty_amount_to_reduce_sup = num_pkgs_actually_reduce * packaging_reduc_sup
                                                     value_of_this_reduction_sup = qty_amount_to_reduce_sup * price_reduc_sup
-                                                    
                                                     df_final_after_all_filters.loc[item_index_reduc_sup, 'Qté Cmdée (IA)'] -= qty_amount_to_reduce_sup
                                                     value_to_reduce_from_supplier_cmd -= value_of_this_reduction_sup
                                                     value_reduced_supplier_total += value_of_this_reduction_sup
-                                                    loops_count_reduc_sup +=1 # Count successful reduction
-                                        
+                                                    loops_count_reduc_sup +=1
+                                                    logging.debug(f"Fourn {supplier_name_adj}, Art {item_index_reduc_sup}: Réduit Qty de {qty_amount_to_reduce_sup}. Reste: {value_to_reduce_from_supplier_cmd:.2f}€")
                                         st.caption(f"Pour {supplier_name_adj}, réduction de {value_reduced_supplier_total:,.2f}€ appliquée pour objectif stock.")
                                         if value_to_reduce_from_supplier_cmd > 0.01: st.warning(f"Objectif stock pour {supplier_name_adj} non atteint. Reste {value_to_reduce_from_supplier_cmd:,.2f}€ excédent.")
                                     else: st.caption(f"Aucun article commandé à réduire pour {supplier_name_adj} pour son objectif stock.")
-                                else: st.caption(f"Objectif stock pour {supplier_name_adj} déjà respecté.")
+                                else: st.caption(f"Objectif de stock pour {supplier_name_adj} déjà respecté.")
                         # --- FIN AJUSTEMENT OBJECTIF STOCK FOURNISSEUR ---
 
-                        # Recalculer totaux après tous les ajustements
                         if not df_final_after_all_filters.empty:
                              df_final_after_all_filters['Total Cmd (€) (IA)'] = df_final_after_all_filters['Qté Cmdée (IA)'] * df_final_after_all_filters["Tarif d'achat"]
                              df_final_after_all_filters['Stock Terme (IA)'] = df_final_after_all_filters['Stock'] + df_final_after_all_filters['Qté Cmdée (IA)']
-
 
                         st.session_state.ai_commande_result_df = df_final_after_all_filters
                         st.session_state.ai_commande_total_amount = df_final_after_all_filters['Total Cmd (€) (IA)'].sum() if not df_final_after_all_filters.empty else 0.0
@@ -1032,7 +1002,6 @@ if 'df_initial_filtered' in st.session_state and isinstance(st.session_state.df_
                             out_b_ai_exp_dl = io.BytesIO(); shts_ai_exp_dl = 0
                             try:
                                 with pd.ExcelWriter(out_b_ai_exp_dl, engine="openpyxl") as writer_ai_exp_dl:
-                                    # Utiliser disp_cols_ai_final qui inclut WoS si présent, mais en excluant Fournisseur
                                     exp_cols_sheet_ai_dl = [c for c in disp_cols_ai_final if c != 'Fournisseur']
                                     q_ai_dl, p_ai_dl, t_ai_dl = "Qté Cmdée (IA)", "Tarif d'achat", "Total Cmd (€) (IA)"
                                     f_ok_ai_dl = False
@@ -1044,14 +1013,12 @@ if 'df_initial_filtered' in st.session_state and isinstance(st.session_state.df_
                                     for sup_e_ai_dl in suppliers_in_final_export:
                                         df_s_e_ai_dl=df_exp_ai_final_dl[df_exp_ai_final_dl["Fournisseur"]==sup_e_ai_dl]
                                         df_w_s_ai_dl=df_s_e_ai_dl[exp_cols_sheet_ai_dl].copy()
-                                        # WoS_Calculated_Supplier n'est plus dans df_w_s_ai_dl car pas dans cols_show_ai_res_final par défaut
-
+                                        # if 'WoS_Calculated_Supplier' in df_w_s_ai_dl.columns: df_w_s_ai_dl['WoS_Calculated_Supplier'] = df_w_s_ai_dl['WoS_Calculated_Supplier'].replace([np.inf, -np.inf], 9999)
                                         n_r_ai_dl=len(df_w_s_ai_dl);s_nm_ai_dl=sanitize_sheet_name(f"IA_Cmd_{sup_e_ai_dl}")
                                         df_w_s_ai_dl.to_excel(writer_ai_exp_dl,sheet_name=s_nm_ai_dl,index=False)
                                         ws_ai_dl=writer_ai_exp_dl.sheets[s_nm_ai_dl]
                                         cmd_col_fmts_ai_dl={"Stock":"#,##0","Forecast Ventes (IA)":"#,##0.00","Conditionnement":"#,##0","Qté Cmdée (IA)":"#,##0","Stock Terme (IA)":"#,##0","Tarif d'achat":"#,##0.00€"}
                                         # if 'WoS_Calculated_Supplier' in exp_cols_sheet_ai_dl: cmd_col_fmts_ai_dl["WoS_Calculated_Supplier"] = "0.0"
-
                                         format_excel_sheet(ws_ai_dl,df_w_s_ai_dl,column_formats=cmd_col_fmts_ai_dl)
                                         if f_ok_ai_dl and n_r_ai_dl>0:
                                             for r_idx_ai_dl in range(2,n_r_ai_dl+2):cell_t_ai_dl=ws_ai_dl[f"{t_l_ai_dl}{r_idx_ai_dl}"];cell_t_ai_dl.value=f"={q_l_ai_dl}{r_idx_ai_dl}*{p_l_ai_dl}{r_idx_ai_dl}";cell_t_ai_dl.number_format='#,##0.00€'
@@ -1059,7 +1026,6 @@ if 'df_initial_filtered' in st.session_state and isinstance(st.session_state.df_
                                         if lbl_name_col_ai_dl not in exp_cols_sheet_ai_dl: lbl_name_col_ai_dl = exp_cols_sheet_ai_dl[1] if len(exp_cols_sheet_ai_dl)>1 else exp_cols_sheet_ai_dl[0]
                                         lbl_col_idx_excel_ai = exp_cols_sheet_ai_dl.index(lbl_name_col_ai_dl)+1
                                         total_col_idx_excel_ai = exp_cols_sheet_ai_dl.index(t_ai_dl)+1
-
                                         total_row_xl_idx_ai_dl=n_r_ai_dl+2
                                         ws_ai_dl.cell(row=total_row_xl_idx_ai_dl, column=lbl_col_idx_excel_ai, value="TOTAL").font=Font(bold=True)
                                         cell_gt_ai_dl=ws_ai_dl.cell(row=total_row_xl_idx_ai_dl, column=total_col_idx_excel_ai)
@@ -1071,7 +1037,6 @@ if 'df_initial_filtered' in st.session_state and isinstance(st.session_state.df_
                                         cell_min_req_v_ai_dl=ws_ai_dl.cell(row=min_req_row_xl_idx_ai_dl, column=total_col_idx_excel_ai)
                                         min_r_s_val_ai_dl=min_o_amts.get(sup_e_ai_dl,0);min_d_s_val_ai_dl=f"{min_r_s_val_ai_dl:,.2f}€"if min_r_s_val_ai_dl>0 else"N/A"
                                         cell_min_req_v_ai_dl.value=min_d_s_val_ai_dl;cell_min_req_v_ai_dl.font=Font(bold=True)
-
                                         if st.session_state.supplier_evaluation_data:
                                             supplier_eval_info_export_ai = st.session_state.supplier_evaluation_data.get(sup_e_ai_dl)
                                             if supplier_eval_info_export_ai:
@@ -1090,50 +1055,38 @@ if 'df_initial_filtered' in st.session_state and isinstance(st.session_state.df_
                             except Exception as e_wrt_ai_dl:logging.exception(f"Err ExcelWriter cmd IA: {e_wrt_ai_dl}");st.error("Erreur export commandes IA.")
                         else:st.info("Aucun article qté IA > 0 à exporter après filtres.")
 
-                        # --- Export Ignored Orders (Modified) ---
+                        # --- Export Ignored Orders ---
                         if 'ai_ignored_orders_df' in st.session_state and st.session_state.ai_ignored_orders_df is not None and not st.session_state.ai_ignored_orders_df.empty:
                             st.markdown("---")
                             st.markdown("##### Export Commandes Ignorées par IA (< 350€ sans stock nég.)")
                             df_ignored_export = st.session_state.ai_ignored_orders_df
-                            
-                            # Columns for the ignored export sheets
-                            cols_ignored_export_sheet = ["AF_RefFourniss", "Référence Article", "Désignation Article", "Stock", "Forecast Ventes (IA)", "Conditionnement", "Qté Cmdée (IA)", "Total Cmd (€) (IA)"]
-
+                            cols_ignored_export_base = ["AF_RefFourniss", "Référence Article", "Désignation Article", "Stock", "Forecast Ventes (IA)", "Conditionnement", "Qté Cmdée (IA)", "Total Cmd (€) (IA)"]
                             out_b_ignored = io.BytesIO(); sheets_ignored_count = 0
                             try:
                                 with pd.ExcelWriter(out_b_ignored, engine="openpyxl") as writer_ignored:
                                     suppliers_in_ignored_export = df_ignored_export['Fournisseur'].unique()
-
                                     for sup_ignored in suppliers_in_ignored_export:
                                         df_sup_ignored = df_ignored_export[df_ignored_export["Fournisseur"] == sup_ignored]
-                                        
-                                        # Ensure columns exist and are in order for this supplier's sheet
-                                        cols_to_write_this_sheet = [c for c in cols_ignored_export_sheet if c in df_sup_ignored.columns]
-                                        df_sheet_to_export_ignored = df_sup_ignored[cols_to_write_this_sheet].copy()
-
-                                        if not df_sheet_to_export_ignored.empty:
+                                        cols_to_write_sheet_ignored = [c for c in cols_ignored_export_base if c in df_sup_ignored.columns]
+                                        df_sheet_ignored_export = df_sup_ignored[cols_to_write_sheet_ignored].copy()
+                                        if not df_sheet_ignored_export.empty:
                                             for col_num_ign_exp in ["Stock", "Forecast Ventes (IA)", "Conditionnement", "Qté Cmdée (IA)", "Total Cmd (€) (IA)"]:
-                                                if col_num_ign_exp in df_sheet_to_export_ignored.columns:
-                                                    df_sheet_to_export_ignored[col_num_ign_exp] = pd.to_numeric(df_sheet_to_export_ignored[col_num_ign_exp], errors='coerce').fillna(0)
-
+                                                if col_num_ign_exp in df_sheet_ignored_export.columns:
+                                                    df_sheet_ignored_export[col_num_ign_exp] = pd.to_numeric(df_sheet_ignored_export[col_num_ign_exp], errors='coerce').fillna(0)
                                             sheet_name_ignored = sanitize_sheet_name(f"Ign_{sup_ignored}")
-                                            df_sheet_to_export_ignored.to_excel(writer_ignored, sheet_name=sheet_name_ignored, index=False)
+                                            df_sheet_ignored_export.to_excel(writer_ignored, sheet_name=sheet_name_ignored, index=False)
                                             ws_ignored = writer_ignored.sheets[sheet_name_ignored]
                                             ignored_fmts_excel = {"Stock":"#,##0", "Forecast Ventes (IA)":"#,##0.00", "Conditionnement":"#,##0", "Qté Cmdée (IA)":"#,##0", "Total Cmd (€) (IA)":"#,##0.00€"}
-                                            format_excel_sheet(ws_ignored, df_sheet_to_export_ignored, column_formats=ignored_fmts_excel)
-                                            
-                                            # Optional: Add totals per sheet for ignored items
-                                            n_r_ign = len(df_sheet_to_export_ignored)
-                                            if n_r_ign > 0 and "Total Cmd (€) (IA)" in cols_to_write_this_sheet and "Désignation Article" in cols_to_write_this_sheet:
-                                                t_col_ign_letter = get_column_letter(cols_to_write_this_sheet.index("Total Cmd (€) (IA)") + 1)
-                                                lbl_col_ign_idx = cols_to_write_this_sheet.index("Désignation Article") + 1
-                                                
+                                            format_excel_sheet(ws_ignored, df_sheet_ignored_export, column_formats=ignored_fmts_excel)
+                                            n_r_ign = len(df_sheet_ignored_export)
+                                            if n_r_ign > 0 and "Total Cmd (€) (IA)" in cols_to_write_sheet_ignored and "Désignation Article" in cols_to_write_sheet_ignored:
+                                                t_col_ign_letter = get_column_letter(cols_to_write_sheet_ignored.index("Total Cmd (€) (IA)") + 1)
+                                                lbl_col_ign_idx = cols_to_write_sheet_ignored.index("Désignation Article") +1
                                                 ws_ignored.cell(row=n_r_ign + 2, column=lbl_col_ign_idx, value="TOTAL IGNORÉ").font = Font(bold=True)
                                                 cell_gt_ign = ws_ignored[f"{t_col_ign_letter}{n_r_ign + 2}"]
                                                 cell_gt_ign.value = f"=SUM({t_col_ign_letter}2:{t_col_ign_letter}{n_r_ign + 1})"
                                                 cell_gt_ign.number_format = '#,##0.00€'; cell_gt_ign.font = Font(bold=True)
                                             sheets_ignored_count += 1
-
                                 if sheets_ignored_count > 0:
                                     out_b_ignored.seek(0)
                                     fn_ignored = f"commandes_IA_ignorees_par_fourn_{pd.Timestamp.now():%Y%m%d_%H%M}.xlsx"
@@ -1144,7 +1097,6 @@ if 'df_initial_filtered' in st.session_state and isinstance(st.session_state.df_
                                         key="dl_ai_cmd_ignored_multi_b_t1_dl"
                                     )
                             except Exception as e_wrt_ignored: logging.exception(f"Err ExcelWriter cmd Ignorées: {e_wrt_ignored}"); st.error("Erreur export commandes ignorées.")
-                        # --- FIN EXPORT IGNORÉES ---
                     else:st.info("Paramètres IA changés. Relancer calcul pour résultats à jour.")
 
     # --- Tab 2: Stock Rotation Analysis ---
@@ -1230,6 +1182,7 @@ if 'df_initial_filtered' in st.session_state and isinstance(st.session_state.df_
 
     # --- Tab 3: Negative Stock Check ---
     with tab3:
+        # ... (Code Tab 3 identique) ...
         st.header("Vérification des Stocks Négatifs")
         st.caption("Analyse tous articles du 'Tableau final'.")
         df_full_neg_t3=st.session_state.get('df_full',None)
@@ -1265,6 +1218,7 @@ if 'df_initial_filtered' in st.session_state and isinstance(st.session_state.df_
 
     # --- Tab 4: Forecast Simulation ---
     with tab4:
+        # ... (Code Tab 4 identique) ...
         st.header("Simulation de Forecast Annuel")
         sel_f_t4 = render_supplier_checkboxes("tab4", all_sups_data, default_select_all=True)
         df_disp_t4 = pd.DataFrame()
