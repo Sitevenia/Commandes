@@ -1,4 +1,4 @@
-# --- START OF FINAL COMPLETE CORRECTED app.py (v11 - Definition Order Fixed Again) ---
+# --- START OF FINAL COMPLETE CORRECTED app.py (v12 - Robust Indexing for WoS) ---
 
 import streamlit as st
 import pandas as pd
@@ -45,21 +45,21 @@ class SuppressStdoutStderr:
 
 # --- ALL HELPER FUNCTIONS DEFINITIONS ---
 
-def sanitize_sheet_name(name): # Moved up
+def sanitize_sheet_name(name):
     if not isinstance(name, str): name = str(name)
     s_name = re.sub(r'[\[\]:*?/\\<>|"]', '_', name)
     if s_name.startswith("'"): s_name = "_" + s_name[1:]
     if s_name.endswith("'"): s_name = s_name[:-1] + "_"
     return s_name[:31]
 
-def sanitize_supplier_key(supplier_name_str): # Moved up
+def sanitize_supplier_key(supplier_name_str):
     if not isinstance(supplier_name_str, str): supplier_name_str = str(supplier_name_str)
     s_key = re.sub(r'\W+', '_', supplier_name_str)
     s_key = re.sub(r'^_+|_+$', '', s_key)
     s_key = re.sub(r'_+', '_', s_key)
     return s_key if s_key else "invalid_supplier_key_name"
 
-def render_supplier_checkboxes(tab_key_prefix, all_suppliers_list, default_select_all=False): # Moved up
+def render_supplier_checkboxes(tab_key_prefix, all_suppliers_list, default_select_all=False):
     select_all_key = f"{tab_key_prefix}_select_all_suppliers"
     supplier_checkbox_keys = { sup: f"{tab_key_prefix}_supplier_cb_{sanitize_supplier_key(sup)}" for sup in all_suppliers_list }
 
@@ -841,7 +841,6 @@ if 'df_initial_filtered' in st.session_state and isinstance(st.session_state.df_
                     for sup_idx_ai, sup_name_proc_ai in enumerate(sel_f_t1_ai):
                         df_sup_subset_ai_proc = df_disp_t1_ai[df_disp_t1_ai["Fournisseur"] == sup_name_proc_ai].copy()
                         sup_specific_min_order_ai = min_amt_ai_t1 if len(sel_f_t1_ai) == 1 else min_o_amts.get(sup_name_proc_ai, 0.0)
-
                         if not df_sup_subset_ai_proc.empty:
                             ai_res_df_sup, _ = ai_calculate_order_quantities(
                                 df_sup_subset_ai_proc, id_sem_cols, fcst_w_ai_t1, sup_specific_min_order_ai
@@ -855,7 +854,6 @@ if 'df_initial_filtered' in st.session_state and isinstance(st.session_state.df_
                     if calc_ok_overall_ai and res_dfs_list_ai_calc:
                         final_ai_res_df_calc = pd.concat(res_dfs_list_ai_calc, ignore_index=True) if res_dfs_list_ai_calc else pd.DataFrame()
                         st.success("✅ Calcul IA initial terminé!")
-
                         df_before_350_filter = final_ai_res_df_calc.copy()
                         st.markdown("---")
                         st.info("Application du filtre : Commandes fournisseur < 350€ ignorées (sauf si article en stock < 0).")
@@ -882,18 +880,17 @@ if 'df_initial_filtered' in st.session_state and isinstance(st.session_state.df_
                              df_after_350_filter = df_before_350_filter
                              st.session_state.ai_ignored_orders_df = pd.DataFrame()
 
-                        # --- AJUSTEMENT POUR OBJECTIF STOCK MAX FOURNISSEUR (NOUVELLE LOGIQUE) ---
-                        df_final_after_all_filters = df_after_350_filter.copy()
+                        # --- AJUSTEMENT POUR OBJECTIF STOCK MAX FOURNISSEUR ---
+                        df_final_after_all_filters = df_after_350_filter.copy() # Start with the result of 350€ filter
 
                         if st.session_state.supplier_evaluation_data and not df_final_after_all_filters.empty:
                             st.markdown("---")
                             st.info("Ajustement des commandes pour respecter les objectifs de valeur de stock max par fournisseur.")
                             
                             suppliers_in_current_command = df_final_after_all_filters['Fournisseur'].unique()
-                            # df_all_items_for_selected_suppliers est df_disp_t1_ai déjà filtré pour les fournisseurs sélectionnés dans l'UI
-                            # On a besoin des infos 'Stock' et 'Tarif d'achat' de TOUS les articles de ces fournisseurs
-                            
-                            df_to_adjust_iteratively = df_final_after_all_filters.copy() # On va modifier ce DF
+                            df_all_items_for_selected_suppliers = df_disp_t1_ai[df_disp_t1_ai['Fournisseur'].isin(suppliers_in_current_command)].copy()
+
+                            df_to_adjust_iteratively = df_final_after_all_filters.copy() # We will modify this DF
 
                             for supplier_name_adj in suppliers_in_current_command:
                                 supplier_target_data = st.session_state.supplier_evaluation_data.get(supplier_name_adj)
@@ -902,48 +899,48 @@ if 'df_initial_filtered' in st.session_state and isinstance(st.session_state.df_
 
                                 max_stock_target_for_supplier = supplier_target_data['max_stock_target']
                                 
-                                # Stock actuel de TOUS les articles de ce fournisseur (même ceux non dans la commande actuelle)
-                                df_supplier_all_items_from_disp = df_disp_t1_ai[df_disp_t1_ai['Fournisseur'] == supplier_name_adj]
-                                if df_supplier_all_items_from_disp.empty: continue
+                                df_supplier_all_items_current_disp = df_all_items_for_selected_suppliers[df_all_items_for_selected_suppliers['Fournisseur'] == supplier_name_adj]
+                                if df_supplier_all_items_current_disp.empty: continue
+
+                                current_stock_value_supplier = (pd.to_numeric(df_supplier_all_items_current_disp['Stock'], errors='coerce').fillna(0) * \
+                                                               pd.to_numeric(df_supplier_all_items_current_disp["Tarif d'achat"], errors='coerce').fillna(0)).sum()
                                 
-                                current_stock_value_supplier = (pd.to_numeric(df_supplier_all_items_from_disp['Stock'], errors='coerce').fillna(0) * \
-                                                               pd.to_numeric(df_supplier_all_items_from_disp["Tarif d'achat"], errors='coerce').fillna(0)).sum()
+                                df_supplier_command_items_adj = df_to_adjust_iteratively[df_to_adjust_iteratively['Fournisseur'] == supplier_name_adj].copy() # Use .copy() to work on a slice
+                                if df_supplier_command_items_adj.empty: continue
 
-                                # Articles de ce fournisseur DANS LA COMMANDE EN COURS d'ajustement
-                                df_supplier_command_items_current_iter = df_to_adjust_iteratively[df_to_adjust_iteratively['Fournisseur'] == supplier_name_adj]
-                                if df_supplier_command_items_current_iter.empty: continue
-
-                                # Ensure numeric types
+                                # Ensure numeric types on the slice
                                 for col_num in ['Stock', "Tarif d'achat", 'Qté Cmdée (IA)', 'Conditionnement']:
-                                     if col_num in df_supplier_command_items_current_iter.columns: # Should always be true if coming from main df
-                                        df_supplier_command_items_current_iter.loc[:, col_num] = pd.to_numeric(df_supplier_command_items_current_iter[col_num], errors='coerce').fillna(0)
-                                df_supplier_command_items_current_iter.loc[:, 'Conditionnement'] = df_supplier_command_items_current_iter['Conditionnement'].apply(lambda x: int(x) if x > 0 else 1)
-                                df_supplier_command_items_current_iter.loc[:, 'Qté Cmdée (IA)'] = df_supplier_command_items_current_iter['Qté Cmdée (IA)'].astype(int)
+                                    if col_num in df_supplier_command_items_adj.columns:
+                                        df_supplier_command_items_adj[col_num] = pd.to_numeric(df_supplier_command_items_adj[col_num], errors='coerce').fillna(0)
+                                df_supplier_command_items_adj['Conditionnement'] = df_supplier_command_items_adj['Conditionnement'].apply(lambda x: int(x) if x > 0 else 1)
+                                df_supplier_command_items_adj['Qté Cmdée (IA)'] = df_supplier_command_items_adj['Qté Cmdée (IA)'].astype(int)
 
 
-                                value_of_current_supplier_order = (df_supplier_command_items_current_iter['Qté Cmdée (IA)'] * df_supplier_command_items_current_iter["Tarif d'achat"]).sum()
+                                value_of_current_supplier_order = (df_supplier_command_items_adj['Qté Cmdée (IA)'] * df_supplier_command_items_adj["Tarif d'achat"]).sum()
                                 projected_stock_value_supplier = current_stock_value_supplier + value_of_current_supplier_order
                                 
                                 value_to_reduce_from_supplier_cmd = max(0, projected_stock_value_supplier - max_stock_target_for_supplier)
                                 st.caption(f"Fourn: {supplier_name_adj} | Val.Stk Act: {current_stock_value_supplier:,.0f}€ | Val.Stk Proj (avant ajust.): {projected_stock_value_supplier:,.0f}€ | Cible Max: {max_stock_target_for_supplier:,.0f}€ | A Reduire Cmd: {value_to_reduce_from_supplier_cmd:,.0f}€")
 
                                 if value_to_reduce_from_supplier_cmd > 0.01:
-                                    # Calculer WoS uniquement pour les articles de ce fournisseur dans la commande
-                                    df_supplier_command_items_for_wos = df_supplier_command_items_current_iter.copy()
                                     wos_period_weeks = 12; available_weeks = len(id_sem_cols)
                                     weeks_to_use_for_wos_supplier = min(wos_period_weeks, available_weeks)
                                     
-                                    df_supplier_command_items_for_wos['WoS_Calculated_Supplier'] = np.inf
+                                    df_supplier_command_items_adj['WoS_Calculated_Supplier'] = np.inf
                                     if weeks_to_use_for_wos_supplier > 0:
                                         semaine_cols_for_wos_sup = id_sem_cols[-weeks_to_use_for_wos_supplier:]
-                                        for item_idx_wos, item_row_wos in df_supplier_command_items_for_wos.iterrows():
-                                            original_item_sales_data = df_disp_t1_ai.loc[item_idx_wos, [c for c in semaine_cols_for_wos_sup if c in df_disp_t1_ai.columns]].fillna(0)
-                                            avg_weekly_sales_item = original_item_sales_data.sum() / weeks_to_use_for_wos_supplier
-                                            current_stock_item_wos = item_row_wos['Stock']
-                                            if avg_weekly_sales_item > 0: df_supplier_command_items_for_wos.loc[item_idx_wos, 'WoS_Calculated_Supplier'] = current_stock_item_wos / avg_weekly_sales_item
-                                            elif current_stock_item_wos <= 0: df_supplier_command_items_for_wos.loc[item_idx_wos, 'WoS_Calculated_Supplier'] = 0.0
+                                        for item_idx_wos, item_row_wos in df_supplier_command_items_adj.iterrows(): # item_idx_wos is index from df_to_adjust_iteratively
+                                            if item_idx_wos in df_disp_t1_ai.index: # Check if index exists in the source of sales data
+                                                original_item_sales_data = df_disp_t1_ai.loc[item_idx_wos, [c for c in semaine_cols_for_wos_sup if c in df_disp_t1_ai.columns]].fillna(0)
+                                                avg_weekly_sales_item = original_item_sales_data.sum() / weeks_to_use_for_wos_supplier
+                                                current_stock_item_wos = item_row_wos['Stock']
+                                                if avg_weekly_sales_item > 0: df_supplier_command_items_adj.loc[item_idx_wos, 'WoS_Calculated_Supplier'] = current_stock_item_wos / avg_weekly_sales_item
+                                                elif current_stock_item_wos <= 0: df_supplier_command_items_adj.loc[item_idx_wos, 'WoS_Calculated_Supplier'] = 0.0
+                                            else: # Fallback if index not found - should be rare if item_idx_wos comes from a subset of df_disp_t1_ai
+                                                df_supplier_command_items_adj.loc[item_idx_wos, 'WoS_Calculated_Supplier'] = np.inf
+
                                     
-                                    candidates_reduc_supplier = df_supplier_command_items_for_wos[df_supplier_command_items_for_wos['Qté Cmdée (IA)'] > 0].copy()
+                                    candidates_reduc_supplier = df_supplier_command_items_adj[df_supplier_command_items_adj['Qté Cmdée (IA)'] > 0].copy()
                                     if not candidates_reduc_supplier.empty:
                                         candidates_reduc_supplier.sort_values(by='WoS_Calculated_Supplier', ascending=False, inplace=True, na_position='first')
                                         value_reduced_supplier_total = 0.0
@@ -962,7 +959,7 @@ if 'df_initial_filtered' in st.session_state and isinstance(st.session_state.df_
                                                 num_pkgs_to_reduce_ideal_item = int(value_to_reduce_from_supplier_cmd / value_per_pkg_reduc_sup) if value_per_pkg_reduc_sup > 0 else 0
                                                 num_pkgs_actually_reduce_item = min(num_pkgs_can_reduce_item, num_pkgs_to_reduce_ideal_item)
                                                 
-                                                if num_pkgs_actually_reduce_item > 0:
+                                                if num_pkgs_actually_reduce_item > 0 :
                                                     qty_amount_to_reduce_sup = num_pkgs_actually_reduce_item * packaging_reduc_sup
                                                     value_of_this_reduction_sup = qty_amount_to_reduce_sup * price_reduc_sup
                                                     
@@ -975,8 +972,7 @@ if 'df_initial_filtered' in st.session_state and isinstance(st.session_state.df_
                                     else: st.caption(f"Aucun article commandé à réduire pour {supplier_name_adj} pour son objectif stock.")
                                 else: st.caption(f"Objectif de stock pour {supplier_name_adj} déjà respecté.")
                             
-                            df_final_after_all_filters = df_to_adjust_iteratively # Mettre à jour le DF principal
-                            # Recalculer les colonnes dérivées après tous les ajustements
+                            df_final_after_all_filters = df_to_adjust_iteratively
                             if not df_final_after_all_filters.empty:
                                  df_final_after_all_filters['Total Cmd (€) (IA)'] = df_final_after_all_filters['Qté Cmdée (IA)'] * df_final_after_all_filters["Tarif d'achat"]
                                  df_final_after_all_filters['Stock Terme (IA)'] = df_final_after_all_filters['Stock'] + df_final_after_all_filters['Qté Cmdée (IA)']
@@ -1047,7 +1043,7 @@ if 'df_initial_filtered' in st.session_state and isinstance(st.session_state.df_
                                     st.warning(f"⚠️ Min cmd pour {sup_chk_min_ai} ({min_applied_in_calc_ai:,.2f}€) non atteint ({actual_order_sup_ai:,.2f}€) - *peut être dû à l'ajustement objectif stock*.")
 
                         cols_show_ai_res_final = ["Fournisseur","AF_RefFourniss","Référence Article","Désignation Article", "Stock", "Forecast Ventes (IA)"]
-                        # La colonne WoS_Calculated_Supplier était temporaire pour le tri, on ne l'affiche pas ici
+                        # WoS_Calculated_Supplier n'est plus ajoutée ici par défaut pour l'affichage principal
                         cols_show_ai_res_final.extend(["Conditionnement", "Qté Cmdée (IA)", "Stock Terme (IA)", "Tarif d'achat", "Total Cmd (€) (IA)"])
                         disp_cols_ai_final = [c for c in cols_show_ai_res_final if c in df_disp_ai_res_final.columns]
 
@@ -1168,7 +1164,6 @@ if 'df_initial_filtered' in st.session_state and isinstance(st.session_state.df_
 
     # --- Tab 2: Stock Rotation Analysis ---
     with tab2:
-        # ... (Code Tab 2 identique) ...
         st.header("Analyse de la Rotation des Stocks")
         sel_f_t2 = render_supplier_checkboxes("tab2", all_sups_data, default_select_all=True)
         df_disp_t2 = pd.DataFrame()
