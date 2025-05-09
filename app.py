@@ -780,7 +780,7 @@ def get_default_session_state():
         'commande_suppliers_calculated_for': [], 'commande_params_calculated_for': {},
         'ai_commande_result_df': None, 'ai_commande_total_amount': 0.0,
         'ai_commande_params_calculated_for': {}, 'ai_forecast_weeks_val': 4, 'ai_min_order_val': 0.0,
-        'ai_stock_reduc_target_val': 0.0,
+        'ai_stock_reduc_target_val': 0.0, 'ai_ignored_orders_df': None, # Added for ignored orders
         'rotation_result_df': None, 'rotation_analysis_period_label': "12 dernières semaines",
         'rotation_suppliers_calculated_for': [], 'rotation_threshold_value': 1.0,
         'show_all_rotation_data': True, 'rotation_params_calculated_for': {},
@@ -1033,12 +1033,10 @@ if 'df_initial_filtered' in st.session_state and isinstance(st.session_state.df_
                     df_disp_t1_ai = df_base_tabs[df_base_tabs["Fournisseur"].isin(sel_f_t1_ai)].copy()
                     st.caption(f"{len(df_disp_t1_ai)} art. / {len(sel_f_t1_ai)} fourn.")
 
-            # Display current stock value for selection
             if sel_f_t1_ai and not df_disp_t1_ai.empty:
                 try:
-                    # Use double quotes for column names with special characters or spaces
                     stock_actuel_selection_ai = pd.to_numeric(df_disp_t1_ai["Stock"], errors='coerce').fillna(0)
-                    tarif_achat_selection_ai = pd.to_numeric(df_disp_t1_ai["Tarif d'achat"], errors='coerce').fillna(0) # Use double quotes
+                    tarif_achat_selection_ai = pd.to_numeric(df_disp_t1_ai["Tarif d'achat"], errors='coerce').fillna(0) # Using " "
                     valeur_stock_selection_ai = (stock_actuel_selection_ai * tarif_achat_selection_ai).sum()
                     st.metric(label="📊 Valeur Stock Actuel (€) (Fourn. Sél.)", value=f"{valeur_stock_selection_ai:,.2f} €")
                 except KeyError as e_stockval:
@@ -1123,25 +1121,34 @@ if 'df_initial_filtered' in st.session_state and isinstance(st.session_state.df_
                         final_ai_res_df_calc = pd.concat(res_dfs_list_ai_calc, ignore_index=True) if res_dfs_list_ai_calc else pd.DataFrame()
                         st.success("✅ Calcul IA initial terminé!")
 
+                        # --- Capture before 350€ filter for ignored export ---
+                        df_before_350_filter = final_ai_res_df_calc.copy()
+                        
                         # --- Apply 350€ Filter ---
                         st.markdown("---")
                         st.info("Application du filtre : Commandes fournisseur < 350€ ignorées (sauf si article en stock < 0).")
                         df_after_350_filter = pd.DataFrame()
-                        if not final_ai_res_df_calc.empty:
-                            final_ai_res_df_calc['Total Cmd (€) (IA)'] = pd.to_numeric(final_ai_res_df_calc['Total Cmd (€) (IA)'], errors='coerce').fillna(0)
-                            final_ai_res_df_calc['Qté Cmdée (IA)'] = pd.to_numeric(final_ai_res_df_calc['Qté Cmdée (IA)'], errors='coerce').fillna(0)
-                            final_ai_res_df_calc['Stock'] = pd.to_numeric(final_ai_res_df_calc['Stock'], errors='coerce').fillna(0)
+                        if not df_before_350_filter.empty:
+                            df_before_350_filter['Total Cmd (€) (IA)'] = pd.to_numeric(df_before_350_filter['Total Cmd (€) (IA)'], errors='coerce').fillna(0)
+                            df_before_350_filter['Qté Cmdée (IA)'] = pd.to_numeric(df_before_350_filter['Qté Cmdée (IA)'], errors='coerce').fillna(0)
+                            df_before_350_filter['Stock'] = pd.to_numeric(df_before_350_filter['Stock'], errors='coerce').fillna(0)
 
-                            order_value_per_supplier = final_ai_res_df_calc[final_ai_res_df_calc['Qté Cmdée (IA)'] > 0].groupby('Fournisseur')['Total Cmd (€) (IA)'].sum()
-                            suppliers_with_neg_stock_ordered = final_ai_res_df_calc[(final_ai_res_df_calc['Qté Cmdée (IA)'] > 0) & (final_ai_res_df_calc['Stock'] < 0)]['Fournisseur'].unique()
+                            order_value_per_supplier = df_before_350_filter[df_before_350_filter['Qté Cmdée (IA)'] > 0].groupby('Fournisseur')['Total Cmd (€) (IA)'].sum()
+                            suppliers_with_neg_stock_ordered = df_before_350_filter[(df_before_350_filter['Qté Cmdée (IA)'] > 0) & (df_before_350_filter['Stock'] < 0)]['Fournisseur'].unique()
                             suppliers_to_keep = set(s for s, v in order_value_per_supplier.items() if v >= 350 or s in suppliers_with_neg_stock_ordered)
 
-                            initial_rows_350 = len(final_ai_res_df_calc)
-                            df_after_350_filter = final_ai_res_df_calc[final_ai_res_df_calc['Fournisseur'].isin(suppliers_to_keep)].copy()
+                            initial_rows_350 = len(df_before_350_filter)
+                            df_after_350_filter = df_before_350_filter[df_before_350_filter['Fournisseur'].isin(suppliers_to_keep)].copy()
                             filtered_rows_350 = len(df_after_350_filter)
                             if initial_rows_350 > filtered_rows_350: st.caption(f"{initial_rows_350 - filtered_rows_350} lignes article (< 350€ sans stock négatif) retirées.")
+
+                            ignored_indices = df_before_350_filter.index.difference(df_after_350_filter.index)
+                            df_ignored_orders = df_before_350_filter.loc[ignored_indices].copy()
+                            st.session_state.ai_ignored_orders_df = df_ignored_orders
+                            logging.info(f"{len(df_ignored_orders)} lignes ignorées (< 350€) stockées pour export séparé.")
                         else:
-                             df_after_350_filter = final_ai_res_df_calc
+                             df_after_350_filter = df_before_350_filter
+                             st.session_state.ai_ignored_orders_df = pd.DataFrame()
 
                         # --- Apply Stock Reduction Filter (Low Rotation Strategy) ---
                         df_after_reduction_filter = df_after_350_filter.copy()
@@ -1151,7 +1158,6 @@ if 'df_initial_filtered' in st.session_state and isinstance(st.session_state.df_
                             st.markdown("---")
                             st.info(f"Tentative de réduction (-{reduction_target_value:,.2f}€) en ciblant faible rotation...")
 
-                            # Calculate WoS for prioritization
                             try:
                                 wos_period_weeks = 12
                                 available_weeks = len(id_sem_cols)
@@ -1173,16 +1179,14 @@ if 'df_initial_filtered' in st.session_state and isinstance(st.session_state.df_
                             except Exception as e_wos:
                                 st.error(f"Erreur calcul WoS: {e_wos}"); df_after_reduction_filter['WoS_Calculated'] = np.inf
 
-                            # Ensure other columns are numeric
-                            # --- CORRECTED LINE HERE ---
+                            # --- CORRECTED LINES HERE ---
                             for col in ["Tarif d'achat", "Qté Cmdée (IA)", "Conditionnement", "Stock"]:
-                            # --- END CORRECTION ---
                                 if col in df_after_reduction_filter.columns:
                                     df_after_reduction_filter[col] = pd.to_numeric(df_after_reduction_filter[col], errors='coerce').fillna(0)
+                            # --- END CORRECTION ---
                             df_after_reduction_filter['Conditionnement'] = df_after_reduction_filter['Conditionnement'].apply(lambda x: int(x) if x > 0 else 1)
                             df_after_reduction_filter['Qté Cmdée (IA)'] = df_after_reduction_filter['Qté Cmdée (IA)'].astype(int)
 
-                            # Reduction Logic
                             # --- CORRECTED LINES HERE (using double quotes) ---
                             current_stock_value_reduc = (df_after_reduction_filter['Stock'] * df_after_reduction_filter["Tarif d'achat"]).sum()
                             target_max_stock_value_reduc = max(0, current_stock_value_reduc - reduction_target_value)
@@ -1211,9 +1215,7 @@ if 'df_initial_filtered' in st.session_state and isinstance(st.session_state.df_
 
                                             current_qty_reduc = df_after_reduction_filter.loc[item_index_reduc, 'Qté Cmdée (IA)']
                                             packaging_reduc = df_after_reduction_filter.loc[item_index_reduc, 'Conditionnement']
-                                            # --- CORRECTED LINE HERE ---
-                                            price_reduc = df_after_reduction_filter.loc[item_index_reduc, "Tarif d'achat"]
-                                            # --- END CORRECTION ---
+                                            price_reduc = df_after_reduction_filter.loc[item_index_reduc, "Tarif d'achat"] # Corrected
 
                                             if packaging_reduc > 0 and price_reduc > 0 and current_qty_reduc >= packaging_reduc:
                                                 value_per_pkg_reduc = packaging_reduc * price_reduc
@@ -1231,9 +1233,7 @@ if 'df_initial_filtered' in st.session_state and isinstance(st.session_state.df_
                                     st.caption(f"Réduction appliquée: {value_reduced_total:,.2f}€ retirés de la commande.")
                                     if value_to_reduce_reduc > 0.01: st.warning(f"Objectif réduction non atteint. Reste {value_to_reduce_reduc:,.2f}€ excédent.")
 
-                                    # --- CORRECTED LINE HERE ---
-                                    df_after_reduction_filter['Total Cmd (€) (IA)'] = df_after_reduction_filter['Qté Cmdée (IA)'] * df_after_reduction_filter["Tarif d'achat"]
-                                    # --- END CORRECTION ---
+                                    df_after_reduction_filter['Total Cmd (€) (IA)'] = df_after_reduction_filter['Qté Cmdée (IA)'] * df_after_reduction_filter["Tarif d'achat"] # Corrected
                                     df_after_reduction_filter['Stock Terme (IA)'] = df_after_reduction_filter['Stock'] + df_after_reduction_filter['Qté Cmdée (IA)']
                                 else:
                                     st.caption("Aucun article commandé trouvé pour appliquer la réduction.")
@@ -1252,25 +1252,33 @@ if 'df_initial_filtered' in st.session_state and isinstance(st.session_state.df_
                         st.error("❌ Aucun résultat IA n'a pu être généré.")
                         st.session_state.ai_commande_result_df = pd.DataFrame()
                         st.session_state.ai_commande_total_amount = 0.0
+                        st.session_state.ai_ignored_orders_df = pd.DataFrame()
                     else: # Partial success
                         st.warning("Certains calculs IA ont échoué. Filtre 350€ appliqué, filtre réduction stock non appliqué sur résultats partiels.")
                         df_after_350_filter = pd.DataFrame()
+                        df_ignored_partial = pd.DataFrame()
                         if res_dfs_list_ai_calc:
                            final_ai_res_df_calc = pd.concat(res_dfs_list_ai_calc, ignore_index=True) if res_dfs_list_ai_calc else pd.DataFrame()
-                           if not final_ai_res_df_calc.empty:
-                               final_ai_res_df_calc['Total Cmd (€) (IA)'] = pd.to_numeric(final_ai_res_df_calc['Total Cmd (€) (IA)'], errors='coerce').fillna(0)
-                               final_ai_res_df_calc['Qté Cmdée (IA)'] = pd.to_numeric(final_ai_res_df_calc['Qté Cmdée (IA)'], errors='coerce').fillna(0)
-                               final_ai_res_df_calc['Stock'] = pd.to_numeric(final_ai_res_df_calc['Stock'], errors='coerce').fillna(0)
+                           df_before_350_partial = final_ai_res_df_calc.copy()
 
-                               order_value_per_supplier = final_ai_res_df_calc[final_ai_res_df_calc['Qté Cmdée (IA)'] > 0].groupby('Fournisseur')['Total Cmd (€) (IA)'].sum()
-                               suppliers_with_neg_stock_ordered = final_ai_res_df_calc[(final_ai_res_df_calc['Qté Cmdée (IA)'] > 0) & (final_ai_res_df_calc['Stock'] < 0)]['Fournisseur'].unique()
+                           if not df_before_350_partial.empty:
+                               df_before_350_partial['Total Cmd (€) (IA)'] = pd.to_numeric(df_before_350_partial['Total Cmd (€) (IA)'], errors='coerce').fillna(0)
+                               df_before_350_partial['Qté Cmdée (IA)'] = pd.to_numeric(df_before_350_partial['Qté Cmdée (IA)'], errors='coerce').fillna(0)
+                               df_before_350_partial['Stock'] = pd.to_numeric(df_before_350_partial['Stock'], errors='coerce').fillna(0)
+
+                               order_value_per_supplier = df_before_350_partial[df_before_350_partial['Qté Cmdée (IA)'] > 0].groupby('Fournisseur')['Total Cmd (€) (IA)'].sum()
+                               suppliers_with_neg_stock_ordered = df_before_350_partial[(df_before_350_partial['Qté Cmdée (IA)'] > 0) & (df_before_350_partial['Stock'] < 0)]['Fournisseur'].unique()
                                suppliers_to_keep = set(s for s, v in order_value_per_supplier.items() if v >= 350 or s in suppliers_with_neg_stock_ordered)
-                               df_after_350_filter = final_ai_res_df_calc[final_ai_res_df_calc['Fournisseur'].isin(suppliers_to_keep)].copy()
+                               df_after_350_filter = df_before_350_partial[df_before_350_partial['Fournisseur'].isin(suppliers_to_keep)].copy()
+
+                               ignored_indices_partial = df_before_350_partial.index.difference(df_after_350_filter.index)
+                               df_ignored_partial = df_before_350_partial.loc[ignored_indices_partial].copy()
                            else:
-                               df_after_350_filter = final_ai_res_df_calc
+                               df_after_350_filter = df_before_350_partial
 
                         st.session_state.ai_commande_result_df = df_after_350_filter
                         st.session_state.ai_commande_total_amount = df_after_350_filter['Total Cmd (€) (IA)'].sum() if not df_after_350_filter.empty else 0.0
+                        st.session_state.ai_ignored_orders_df = df_ignored_partial
                         st.rerun()
 
                 # --- Display Results ---
@@ -1291,14 +1299,11 @@ if 'df_initial_filtered' in st.session_state and isinstance(st.session_state.df_
                         st.metric(label="💰 Montant Total Cmd Final (€) (IA)", value=f"{total_amt_ai_res_final:,.2f} €")
 
                         if not df_disp_ai_res_final.empty:
-                            # --- CORRECTED LINES HERE ---
                             df_disp_ai_res_final['Stock'] = pd.to_numeric(df_disp_ai_res_final['Stock'], errors='coerce').fillna(0)
                             df_disp_ai_res_final['Qté Cmdée (IA)'] = pd.to_numeric(df_disp_ai_res_final['Qté Cmdée (IA)'], errors='coerce').fillna(0)
-                            df_disp_ai_res_final["Tarif d'achat"] = pd.to_numeric(df_disp_ai_res_final["Tarif d'achat"], errors='coerce').fillna(0)
-                            final_proj_stock_value = ((df_disp_ai_res_final['Stock'] + df_disp_ai_res_final['Qté Cmdée (IA)']) * df_disp_ai_res_final["Tarif d'achat"]).sum()
-                            # --- END CORRECTION ---
+                            df_disp_ai_res_final["Tarif d'achat"] = pd.to_numeric(df_disp_ai_res_final["Tarif d'achat"], errors='coerce').fillna(0) # Corrected
+                            final_proj_stock_value = ((df_disp_ai_res_final['Stock'] + df_disp_ai_res_final['Qté Cmdée (IA)']) * df_disp_ai_res_final["Tarif d'achat"]).sum() # Corrected
                             st.metric(label="📊 Valeur Stock Projeté Final (€) (Articles Commandés)", value=f"{final_proj_stock_value:,.2f} €")
-
 
                         for sup_chk_min_ai in sel_f_t1_ai:
                             sup_min_cfg_val_ai = min_o_amts.get(sup_chk_min_ai, 0.0)
@@ -1315,9 +1320,7 @@ if 'df_initial_filtered' in st.session_state and isinstance(st.session_state.df_
 
                         if not disp_cols_ai_final: st.error("Aucune col à afficher (résultats IA).")
                         else:
-                            # --- CORRECTED LINE HERE ---
-                            fmts_ai_final = {"Tarif d'achat":"{:,.2f}€","Total Cmd (€) (IA)":"{:,.2f}€","Forecast Ventes (IA)":"{:,.2f}","Stock":"{:,.0f}","Conditionnement":"{:,.0f}","Qté Cmdée (IA)":"{:,.0f}","Stock Terme (IA)":"{:,.0f}"}
-                            # --- END CORRECTION ---
+                            fmts_ai_final = {"Tarif d'achat":"{:,.2f}€","Total Cmd (€) (IA)":"{:,.2f}€","Forecast Ventes (IA)":"{:,.2f}","Stock":"{:,.0f}","Conditionnement":"{:,.0f}","Qté Cmdée (IA)":"{:,.0f}","Stock Terme (IA)":"{:,.0f}"} # Corrected
                             if 'WoS_Calculated' in disp_cols_ai_final: fmts_ai_final["WoS_Calculated"] = "{:,.1f}"
 
                             df_display_ordered_only = df_disp_ai_res_final[df_disp_ai_res_final["Qté Cmdée (IA)"] > 0] if "Qté Cmdée (IA)" in df_disp_ai_res_final else df_disp_ai_res_final
@@ -1340,9 +1343,7 @@ if 'df_initial_filtered' in st.session_state and isinstance(st.session_state.df_
                             try:
                                 with pd.ExcelWriter(out_b_ai_exp_dl, engine="openpyxl") as writer_ai_exp_dl:
                                     exp_cols_sheet_ai_dl = [c for c in disp_cols_ai_final if c != 'Fournisseur']
-                                    # --- CORRECTED LINE HERE ---
-                                    q_ai_dl, p_ai_dl, t_ai_dl = "Qté Cmdée (IA)", "Tarif d'achat", "Total Cmd (€) (IA)"
-                                    # --- END CORRECTION ---
+                                    q_ai_dl, p_ai_dl, t_ai_dl = "Qté Cmdée (IA)", "Tarif d'achat", "Total Cmd (€) (IA)" # Corrected
                                     f_ok_ai_dl = False
                                     if all(c_ai_dl in exp_cols_sheet_ai_dl for c_ai_dl in [q_ai_dl,p_ai_dl,t_ai_dl]):
                                         try: q_l_ai_dl,p_l_ai_dl,t_l_ai_dl=get_column_letter(exp_cols_sheet_ai_dl.index(q_ai_dl)+1),get_column_letter(exp_cols_sheet_ai_dl.index(p_ai_dl)+1),get_column_letter(exp_cols_sheet_ai_dl.index(t_ai_dl)+1);f_ok_ai_dl=True
@@ -1359,9 +1360,7 @@ if 'df_initial_filtered' in st.session_state and isinstance(st.session_state.df_
                                         n_r_ai_dl=len(df_w_s_ai_dl);s_nm_ai_dl=sanitize_sheet_name(f"IA_Cmd_{sup_e_ai_dl}")
                                         df_w_s_ai_dl.to_excel(writer_ai_exp_dl,sheet_name=s_nm_ai_dl,index=False)
                                         ws_ai_dl=writer_ai_exp_dl.sheets[s_nm_ai_dl]
-                                        # --- CORRECTED LINE HERE ---
-                                        cmd_col_fmts_ai_dl={"Stock":"#,##0","Forecast Ventes (IA)":"#,##0.00","Conditionnement":"#,##0","Qté Cmdée (IA)":"#,##0","Stock Terme (IA)":"#,##0","Tarif d'achat":"#,##0.00€"}
-                                        # --- END CORRECTION ---
+                                        cmd_col_fmts_ai_dl={"Stock":"#,##0","Forecast Ventes (IA)":"#,##0.00","Conditionnement":"#,##0","Qté Cmdée (IA)":"#,##0","Stock Terme (IA)":"#,##0","Tarif d'achat":"#,##0.00€"} # Corrected
                                         if 'WoS_Calculated' in exp_cols_sheet_ai_dl:
                                             cmd_col_fmts_ai_dl["WoS_Calculated"] = "0.0"
 
@@ -1393,6 +1392,41 @@ if 'df_initial_filtered' in st.session_state and isinstance(st.session_state.df_
                                 else:st.info("Aucune qté IA > 0 à exporter après application des filtres et objectifs.")
                             except Exception as e_wrt_ai_dl:logging.exception(f"Err ExcelWriter cmd IA ajustée: {e_wrt_ai_dl}");st.error("Erreur export commandes IA finales.")
                         else:st.info("Aucun article qté IA > 0 à exporter après application des filtres et objectifs.")
+
+                        # --- Export Ignored Orders ---
+                        if 'ai_ignored_orders_df' in st.session_state and st.session_state.ai_ignored_orders_df is not None and not st.session_state.ai_ignored_orders_df.empty:
+                            st.markdown("---")
+                            st.markdown("##### Export Commandes Ignorées (< 350€ sans stock nég.)")
+                            df_ignored_export = st.session_state.ai_ignored_orders_df
+                            cols_ignored_export = ["Fournisseur", "AF_RefFourniss", "Référence Article", "Désignation Article", "Stock", "Qté Cmdée (IA)", "Total Cmd (€) (IA)"]
+                            cols_ignored_exist = [c for c in cols_ignored_export if c in df_ignored_export.columns]
+                            df_ignored_export_final = df_ignored_export[cols_ignored_exist].copy()
+
+                            df_ignored_export_final["Total Cmd (€) (IA)"] = pd.to_numeric(df_ignored_export_final["Total Cmd (€) (IA)"], errors='coerce').fillna(0)
+                            df_ignored_export_final["Qté Cmdée (IA)"] = pd.to_numeric(df_ignored_export_final["Qté Cmdée (IA)"], errors='coerce').fillna(0)
+                            df_ignored_export_final["Stock"] = pd.to_numeric(df_ignored_export_final["Stock"], errors='coerce').fillna(0)
+
+                            out_b_ignored = io.BytesIO()
+                            try:
+                                with pd.ExcelWriter(out_b_ignored, engine="openpyxl") as writer_ignored:
+                                    sheet_name_ignored = "Commandes_Ignorees_lt_350"
+                                    df_ignored_export_final.to_excel(writer_ignored, sheet_name=sheet_name_ignored, index=False)
+                                    ws_ignored = writer_ignored.sheets[sheet_name_ignored]
+                                    ignored_fmts = {"Total Cmd (€) (IA)":"#,##0.00€", "Qté Cmdée (IA)":"#,##0", "Stock":"#,##0"}
+                                    format_excel_sheet(ws_ignored, df_ignored_export_final, column_formats=ignored_fmts)
+
+                                out_b_ignored.seek(0)
+                                fn_ignored = f"commandes_IA_ignorees_{pd.Timestamp.now():%Y%m%d_%H%M}.xlsx"
+                                st.download_button(
+                                    label=f"📥 Télécharger Commandes Ignorées ({len(df_ignored_export_final)} lignes)",
+                                    data=out_b_ignored,
+                                    file_name=fn_ignored,
+                                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                    key="dl_ai_cmd_ignored_b_t1_dl"
+                                )
+                            except Exception as e_wrt_ignored:
+                                logging.exception(f"Err ExcelWriter cmd Ignorées: {e_wrt_ignored}")
+                                st.error("Erreur export commandes ignorées.")
                     else:st.info("Paramètres IA ou objectif de réduction changés. Relancer calcul pour résultats à jour.")
 
     # --- Tab 2: Stock Rotation Analysis ---
