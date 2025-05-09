@@ -1,4 +1,4 @@
-# --- START OF FINAL COMPLETE CORRECTED app.py (v16 - Robust Tab6 Access) ---
+# --- START OF FINAL COMPLETE CORRECTED app.py (v17 - NameError Fix) ---
 
 import streamlit as st
 import pandas as pd
@@ -445,7 +445,7 @@ def ai_calculate_order_quantities(df_products_for_ai, historical_semaine_cols, n
         else: logging.warning(f"Col vente hist. '{col_valid_ts}' non trouvée."); df_calc_ai[col_valid_ts] = np.nan
     df_calc_ai["Qté Cmdée (IA)"] = 0; df_calc_ai["Forecast Ventes (IA)"] = 0.0
     num_prods = len(df_calc_ai); progress_bar_placeholder = st.empty()
-    
+
     for i, (prod_idx, prod_row) in enumerate(df_calc_ai.iterrows()):
         progress_bar_placeholder.progress((i + 1) / num_prods, text=f"Prévision IA: Article {i+1}/{num_prods}")
         prod_ref_log = prod_row.get("Référence Article", f"Index {prod_idx}")
@@ -460,7 +460,7 @@ def ai_calculate_order_quantities(df_products_for_ai, historical_semaine_cols, n
             if product_events_list and product_ref_log:
                 current_product_events_prophet = [
                     {'holiday': event['event_name'], 'ds': event['ds'], 'lower_window': 0, 'upper_window': 0}
-                    for event in product_events_list 
+                    for event in product_events_list
                     if event["product_ref"] == product_ref_log and pd.notna(event['ds'])
                 ]
                 if current_product_events_prophet:
@@ -468,7 +468,7 @@ def ai_calculate_order_quantities(df_products_for_ai, historical_semaine_cols, n
                     holidays_df_for_prophet['ds'] = pd.to_datetime(holidays_df_for_prophet['ds'])
             if not prod_ts_df_fit.empty and (prod_ts_df_fit['ds'].max() - prod_ts_df_fit['ds'].min()) >= pd.Timedelta(days=365 + 180):
                 model_prophet.add_seasonality(name='yearly', period=365.25, fourier_order=10)
-            with SuppressStdoutStderr(): 
+            with SuppressStdoutStderr():
                 model_prophet.fit(prod_ts_df_fit[['ds', 'y']].dropna(subset=['y']), holidays=holidays_df_for_prophet)
             future_df = model_prophet.make_future_dataframe(periods=num_forecast_weeks, freq='W-MON')
             forecast_df_res = model_prophet.predict(future_df)
@@ -568,7 +568,8 @@ if uploaded_file and st.session_state.df_full is None:
         if "Date Création Article" in df_full_read.columns:
             try:
                 df_full_read["Date Création Article"] = pd.to_datetime(df_full_read["Date Création Article"], format='%d/%m/%Y', errors='coerce')
-                if df_full_read["Date Création Article"].isnull().any(): st.warning("⚠️ Certaines dates de création d'article n'ont pas pu être lues et seront ignorées.")
+                if df_full_read["Date Création Article"].isnull().any():
+                    st.warning("⚠️ Certaines dates de création d'article n'ont pas pu être lues et seront ignorées.")
             except Exception as e_date_creation: st.error(f"❌ Erreur conversion 'Date Création Article': {e_date_creation}.")
         else: st.warning("⚠️ Colonne 'Date Création Article' non trouvée.")
         for str_c_tf in ["Fournisseur", "AF_RefFourniss", "Référence Article", "Désignation Article"]:
@@ -576,7 +577,7 @@ if uploaded_file and st.session_state.df_full is None:
         st.session_state.df_full = df_full_read
         st.success("✅ 'TF' lu.")
 
-        st.info("Lecture 'Min commande'...") # ... (reste du chargement identique)
+        st.info("Lecture 'Min commande'...")
         excel_io_buf.seek(0)
         df_min_c_read = safe_read_excel(excel_io_buf, sheet_name="Minimum de commande")
         min_o_dict_temp_read = {}
@@ -616,7 +617,6 @@ if uploaded_file and st.session_state.df_full is None:
                 st.session_state.df_suivi_commandes = pd.DataFrame()
         elif df_suivi_read is None: st.info("Onglet 'Suivi cmds' non trouvé.")
         else: st.info("Onglet 'Suivi cmds' vide."); st.session_state.df_suivi_commandes = pd.DataFrame()
-
 
         df_full_state = st.session_state.df_full
         df_init_filt_temp_read = df_full_state[
@@ -677,12 +677,11 @@ if 'df_initial_filtered' in st.session_state and isinstance(st.session_state.df_
 
     # --- Tab 1: Classic Order Forecast ---
     with tab1:
-        # ... (Code Tab 1 identique) ...
-        pass # Placeholder, le code est déjà correct
+        # ... (Code identique) ...
+        pass
 
     # --- Tab 1 AI: Prévision Commande (IA) ---
     with tab1_ai:
-        # ... (Code Tab1 AI identique jusqu'au bouton de calcul) ...
         st.header("🤖 Prévision des Quantités à Commander (avec IA)")
         if not PROPHET_AVAILABLE:
             st.error("La librairie Prophet (pour l'IA) n'est pas installée. Cette fonctionnalité est désactivée.")
@@ -697,7 +696,7 @@ if 'df_initial_filtered' in st.session_state and isinstance(st.session_state.df_
             if sel_f_t1_ai and not df_disp_t1_ai.empty:
                 try:
                     stock_actuel_selection_ai = pd.to_numeric(df_disp_t1_ai["Stock"], errors='coerce').fillna(0)
-                    tarif_achat_selection_ai = pd.to_numeric(df_disp_t1_ai["Tarif d'achat"], errors='coerce').fillna(0)
+                    tarif_achat_selection_ai = pd.to_numeric(df_disp_t1_ai["Tarif d'achat"], errors='coerce').fillna(0) # Corrected
                     valeur_stock_selection_ai = (stock_actuel_selection_ai * tarif_achat_selection_ai).sum()
                     st.metric(label="📊 Valeur Stock Actuel (€) (Fourn. Sél.)", value=f"{valeur_stock_selection_ai:,.2f} €")
                 except KeyError as e_stockval: st.error(f"Erreur : Colonne manquante pour valeur stock ('{e_stockval}').")
@@ -764,7 +763,7 @@ if 'df_initial_filtered' in st.session_state and isinstance(st.session_state.df_
                             else: st.error(f"Échec calcul IA pour: {sup_name_proc_ai}"); calc_ok_overall_ai = False
                         else: logging.info(f"Aucun article pour {sup_name_proc_ai} (IA).")
 
-                    df_final_after_all_filters = pd.DataFrame()
+                    df_final_after_all_filters = pd.DataFrame() # Initialiser ici
 
                     if calc_ok_overall_ai and res_dfs_list_ai_calc:
                         final_ai_res_df_calc = pd.concat(res_dfs_list_ai_calc, ignore_index=True) if res_dfs_list_ai_calc else pd.DataFrame()
@@ -796,16 +795,16 @@ if 'df_initial_filtered' in st.session_state and isinstance(st.session_state.df_
                              st.session_state.ai_ignored_orders_df = pd.DataFrame()
                         
                         # --- AJUSTEMENT POUR OBJECTIF STOCK MAX FOURNISSEUR (AVEC SRM ET RELAXATION) ---
-                        df_final_after_all_filters = df_after_350_filter.copy()
+                        df_to_adjust_iteratively = df_after_350_filter.copy() # df_final_after_all_filters devient df_to_adjust_iteratively
 
-                        if st.session_state.supplier_evaluation_data and not df_final_after_all_filters.empty:
+                        if st.session_state.supplier_evaluation_data and not df_to_adjust_iteratively.empty:
                             st.markdown("---")
                             st.info("Ajustement des commandes pour respecter les objectifs de valeur de stock max par fournisseur.")
                             
-                            suppliers_in_current_command_eval = df_final_after_all_filters['Fournisseur'].unique()
+                            suppliers_in_current_command_eval = df_to_adjust_iteratively['Fournisseur'].unique()
                             df_all_items_for_selected_suppliers_ui_eval = df_disp_t1_ai[df_disp_t1_ai['Fournisseur'].isin(suppliers_in_current_command_eval)].copy()
-                            df_to_adjust_iteratively = df_final_after_all_filters.copy()
-
+                            
+                            # On itère sur une copie, mais on modifie df_to_adjust_iteratively directement
                             for supplier_name_adj_eval in suppliers_in_current_command_eval:
                                 supplier_target_data_eval = st.session_state.supplier_evaluation_data.get(supplier_name_adj_eval)
                                 if not supplier_target_data_eval or 'max_stock_target' not in supplier_target_data_eval:
@@ -814,12 +813,18 @@ if 'df_initial_filtered' in st.session_state and isinstance(st.session_state.df_
                                 df_supplier_all_items_current_disp_iter_eval = df_all_items_for_selected_suppliers_ui_eval[df_all_items_for_selected_suppliers_ui_eval['Fournisseur'] == supplier_name_adj_eval]
                                 if df_supplier_all_items_current_disp_iter_eval.empty: continue
                                 current_stock_value_supplier_eval = (pd.to_numeric(df_supplier_all_items_current_disp_iter_eval['Stock'], errors='coerce').fillna(0) * pd.to_numeric(df_supplier_all_items_current_disp_iter_eval["Tarif d'achat"], errors='coerce').fillna(0)).sum()
+                                
+                                # Travailler sur une copie pour les calculs internes à la boucle fournisseur
                                 df_supplier_command_items_adj_eval = df_to_adjust_iteratively[df_to_adjust_iteratively['Fournisseur'] == supplier_name_adj_eval].copy()
                                 if df_supplier_command_items_adj_eval.empty: continue
+
+                                # Assurer les types numériques pour les calculs
                                 for col_num in ['Stock', "Tarif d'achat", 'Qté Cmdée (IA)', 'Conditionnement']:
-                                    if col_num in df_supplier_command_items_adj_eval.columns: df_supplier_command_items_adj_eval.loc[:, col_num] = pd.to_numeric(df_supplier_command_items_adj_eval[col_num], errors='coerce').fillna(0)
-                                df_supplier_command_items_adj_eval.loc[:, 'Conditionnement'] = df_supplier_command_items_adj_eval['Conditionnement'].apply(lambda x: int(x) if x > 0 else 1)
-                                df_supplier_command_items_adj_eval.loc[:, 'Qté Cmdée (IA)'] = df_supplier_command_items_adj_eval['Qté Cmdée (IA)'].astype(int)
+                                    if col_num in df_supplier_command_items_adj_eval.columns:
+                                        df_supplier_command_items_adj_eval[col_num] = pd.to_numeric(df_supplier_command_items_adj_eval[col_num], errors='coerce').fillna(0)
+                                df_supplier_command_items_adj_eval['Conditionnement'] = df_supplier_command_items_adj_eval['Conditionnement'].apply(lambda x: int(x) if x > 0 else 1)
+                                df_supplier_command_items_adj_eval['Qté Cmdée (IA)'] = df_supplier_command_items_adj_eval['Qté Cmdée (IA)'].astype(int)
+
                                 value_of_current_supplier_order_eval = (df_supplier_command_items_adj_eval['Qté Cmdée (IA)'] * df_supplier_command_items_adj_eval["Tarif d'achat"]).sum()
                                 projected_stock_value_supplier_eval = current_stock_value_supplier_eval + value_of_current_supplier_order_eval
                                 value_to_reduce_from_supplier_cmd_eval = max(0, projected_stock_value_supplier_eval - max_stock_target_for_supplier_eval)
@@ -828,6 +833,8 @@ if 'df_initial_filtered' in st.session_state and isinstance(st.session_state.df_
                                 if value_to_reduce_from_supplier_cmd_eval > 0.01:
                                     wos_period_weeks = 12; available_weeks = len(id_sem_cols)
                                     weeks_to_use_for_wos_supplier_eval = min(wos_period_weeks, available_weeks)
+                                    
+                                    # df_supplier_command_items_adj_eval est déjà une copie, on peut y ajouter des colonnes
                                     df_supplier_command_items_adj_eval['WoS_Calculated_Supplier'] = np.inf
                                     df_supplier_command_items_adj_eval['SRM_Qty'] = 0
                                     if weeks_to_use_for_wos_supplier_eval > 0:
@@ -857,12 +864,13 @@ if 'df_initial_filtered' in st.session_state and isinstance(st.session_state.df_
                                     if not candidates_reduc_supplier_eval.empty:
                                         candidates_reduc_supplier_eval.sort_values(by='WoS_Calculated_Supplier', ascending=False, inplace=True, na_position='first')
                                         value_reduced_supplier_total_eval = 0.0
+                                        
                                         for item_index_reduc_sup in candidates_reduc_supplier_eval.index:
                                             if value_to_reduce_from_supplier_cmd_eval <= 0.01: break
                                             current_qty_reduc_sup = df_to_adjust_iteratively.loc[item_index_reduc_sup, 'Qté Cmdée (IA)']
                                             packaging_reduc_sup = df_to_adjust_iteratively.loc[item_index_reduc_sup, 'Conditionnement']
                                             price_reduc_sup = df_to_adjust_iteratively.loc[item_index_reduc_sup, "Tarif d'achat"]
-                                            srm_sup = df_supplier_command_items_adj_eval.loc[item_index_reduc_sup, 'SRM_Qty']
+                                            srm_sup = df_supplier_command_items_adj_eval.loc[item_index_reduc_sup, 'SRM_Qty'] # Get SRM from the temp df
                                             if packaging_reduc_sup > 0 and price_reduc_sup > 0 and current_qty_reduc_sup > srm_sup :
                                                 qty_reducible_above_srm_item = current_qty_reduc_sup - srm_sup
                                                 num_pkgs_can_remove_item = int(qty_reducible_above_srm_item / packaging_reduc_sup)
@@ -883,10 +891,10 @@ if 'df_initial_filtered' in st.session_state and isinstance(st.session_state.df_
                                     else: st.caption(f"Aucun article commandé/réductible pour {supplier_name_adj_eval} pour son objectif stock.")
                                 else: st.caption(f"Objectif de stock pour {supplier_name_adj_eval} déjà respecté.")
                         
-                        if not df_to_adjust_iteratively.empty:
-                             df_to_adjust_iteratively['Total Cmd (€) (IA)'] = df_to_adjust_iteratively['Qté Cmdée (IA)'] * df_to_adjust_iteratively["Tarif d'achat"]
-                             df_to_adjust_iteratively['Stock Terme (IA)'] = df_to_adjust_iteratively['Stock'] + df_to_adjust_iteratively['Qté Cmdée (IA)']
                         df_final_after_all_filters = df_to_adjust_iteratively
+                        if not df_final_after_all_filters.empty:
+                             df_final_after_all_filters['Total Cmd (€) (IA)'] = df_final_after_all_filters['Qté Cmdée (IA)'] * df_final_after_all_filters["Tarif d'achat"]
+                             df_final_after_all_filters['Stock Terme (IA)'] = df_final_after_all_filters['Stock'] + df_final_after_all_filters['Qté Cmdée (IA)']
                         # --- FIN AJUSTEMENT OBJECTIF STOCK FOURNISSEUR ---
 
                         st.session_state.ai_commande_result_df = df_final_after_all_filters
@@ -954,12 +962,15 @@ if 'df_initial_filtered' in st.session_state and isinstance(st.session_state.df_
                                     st.warning(f"⚠️ Min cmd pour {sup_chk_min_ai} ({min_applied_in_calc_ai:,.2f}€) non atteint ({actual_order_sup_ai:,.2f}€) - *peut être dû à l'ajustement objectif stock*.")
 
                         cols_show_ai_res_final = ["Fournisseur","AF_RefFourniss","Référence Article","Désignation Article", "Stock", "Forecast Ventes (IA)"]
+                        # WoS_Calculated_Supplier was temporary for sorting, not usually shown in final result unless for debug
+                        # if 'WoS_Calculated_Supplier' in df_disp_ai_res_final.columns: cols_show_ai_res_final.append("WoS_Calculated_Supplier")
                         cols_show_ai_res_final.extend(["Conditionnement", "Qté Cmdée (IA)", "Stock Terme (IA)", "Tarif d'achat", "Total Cmd (€) (IA)"])
                         disp_cols_ai_final = [c for c in cols_show_ai_res_final if c in df_disp_ai_res_final.columns]
 
                         if not disp_cols_ai_final: st.error("Aucune col à afficher (résultats IA).")
                         else:
                             fmts_ai_final = {"Tarif d'achat":"{:,.2f}€","Total Cmd (€) (IA)":"{:,.2f}€","Forecast Ventes (IA)":"{:,.2f}","Stock":"{:,.0f}","Conditionnement":"{:,.0f}","Qté Cmdée (IA)":"{:,.0f}","Stock Terme (IA)":"{:,.0f}"}
+                            # if 'WoS_Calculated_Supplier' in disp_cols_ai_final: fmts_ai_final["WoS_Calculated_Supplier"] = "{:,.1f}"
                             df_display_ordered_only = df_disp_ai_res_final[df_disp_ai_res_final["Qté Cmdée (IA)"] > 0] if "Qté Cmdée (IA)" in df_disp_ai_res_final else df_disp_ai_res_final
 
                             if df_display_ordered_only.empty and not df_disp_ai_res_final.empty:
@@ -977,7 +988,7 @@ if 'df_initial_filtered' in st.session_state and isinstance(st.session_state.df_
                             out_b_ai_exp_dl = io.BytesIO(); shts_ai_exp_dl = 0
                             try:
                                 with pd.ExcelWriter(out_b_ai_exp_dl, engine="openpyxl") as writer_ai_exp_dl:
-                                    exp_cols_sheet_ai_dl = [c for c in disp_cols_ai_final if c != 'Fournisseur']
+                                    exp_cols_sheet_ai_dl = [c for c in disp_cols_ai_final if c != 'Fournisseur' and c != 'WoS_Calculated_Supplier']
                                     q_ai_dl, p_ai_dl, t_ai_dl = "Qté Cmdée (IA)", "Tarif d'achat", "Total Cmd (€) (IA)"
                                     f_ok_ai_dl = False
                                     if all(c_ai_dl in exp_cols_sheet_ai_dl for c_ai_dl in [q_ai_dl,p_ai_dl,t_ai_dl]):
@@ -1075,19 +1086,19 @@ if 'df_initial_filtered' in st.session_state and isinstance(st.session_state.df_
 
     # --- Tab 2: Stock Rotation Analysis ---
     with tab2:
-        # ... (Code Tab 2 inchangé) ...
+        # ... (Code identique) ...
         pass
     # --- Tab 3: Negative Stock Check ---
     with tab3:
-        # ... (Code Tab 3 inchangé) ...
+        # ... (Code identique) ...
         pass
     # --- Tab 4: Forecast Simulation ---
     with tab4:
-        # ... (Code Tab 4 inchangé) ...
+        # ... (Code identique) ...
         pass
     # --- Tab 5: Supplier Order Tracking ---
     with tab5_suivi:
-        # ... (Code Tab 5 inchangé) ...
+        # ... (Code identique) ...
         pass
     # --- Tab 6: New Articles Search ---
     with tab6:
@@ -1110,7 +1121,13 @@ if 'df_initial_filtered' in st.session_state and isinstance(st.session_state.df_
                 max_date_possible = df_for_dates["Date Création Article"].max()
                 default_start_date = max(min_date_possible, pd.Timestamp.now() - pd.DateOffset(months=1))
                 if pd.isna(default_start_date): default_start_date = pd.Timestamp.now() - pd.DateOffset(months=1)
-                start_date = st.date_input("Afficher les articles créés à partir du :", value=default_start_date.date(), min_value=min_date_possible.date(), max_value=max_date_possible.date(), key="new_article_start_date")
+                start_date = st.date_input(
+                    "Afficher les articles créés à partir du :",
+                    value=default_start_date.date(),
+                    min_value=min_date_possible.date(),
+                    max_value=max_date_possible.date(),
+                    key="new_article_start_date"
+                )
                 if start_date:
                     start_datetime = pd.to_datetime(start_date)
                     source_df_new = st.session_state.df_initial_filtered if not st.session_state.df_initial_filtered.empty else df_full_for_tab6
@@ -1118,14 +1135,15 @@ if 'df_initial_filtered' in st.session_state and isinstance(st.session_state.df_
                         df_to_filter_new = source_df_new.copy()
                         valid_dates_mask_new = df_to_filter_new["Date Création Article"].notna()
                         new_articles_df = df_to_filter_new[valid_dates_mask_new & (df_to_filter_new["Date Création Article"] >= start_datetime)].copy()
-                        rows_with_invalid_dates_display = len(df_to_filter_new) - len(df_to_filter_new[valid_dates_mask_new])
+                        rows_with_invalid_dates_display = len(df_to_filter_new[~valid_dates_mask_new]) # Count rows that had NaT
                         if rows_with_invalid_dates_display > 0: st.caption(f"{rows_with_invalid_dates_display} article(s) ignorés (date création manquante/invalide).")
                         st.markdown(f"--- \n ### {len(new_articles_df)} Nouveaux Articles Trouvés")
                         if not new_articles_df.empty:
                             cols_display_new = ["Fournisseur", "AF_RefFourniss", "Référence Article", "Désignation Article", "Date Création Article", "Stock", "Tarif d'achat"]
                             existing_cols_to_display_new = [col for col in cols_display_new if col in new_articles_df.columns]
                             df_display_new_final = new_articles_df[existing_cols_to_display_new].copy()
-                            if "Date Création Article" in df_display_new_final.columns: df_display_new_final.loc[:, "Date Création Article"] = df_display_new_final["Date Création Article"].dt.strftime('%d/%m/%Y')
+                            if "Date Création Article" in df_display_new_final.columns:
+                                df_display_new_final.loc[:, "Date Création Article"] = df_display_new_final["Date Création Article"].dt.strftime('%d/%m/%Y')
                             st.dataframe(df_display_new_final)
                             st.markdown("#### Exporter la Liste des Nouveaux Articles")
                             cols_to_export_new = ["AF_RefFourniss", "Référence Article", "Désignation Article", "Date Création Article"]
@@ -1133,7 +1151,8 @@ if 'df_initial_filtered' in st.session_state and isinstance(st.session_state.df_
                             if not existing_cols_to_export_new: st.warning("Colonnes nécessaires à l'export non trouvées.")
                             else:
                                 df_export_new_articles_final = new_articles_df[existing_cols_to_export_new].copy()
-                                if "Date Création Article" in df_export_new_articles_final.columns: df_export_new_articles_final.loc[:, "Date Création Article"] = df_export_new_articles_final["Date Création Article"].dt.strftime('%d/%m/%Y')
+                                if "Date Création Article" in df_export_new_articles_final.columns:
+                                    df_export_new_articles_final.loc[:, "Date Création Article"] = df_export_new_articles_final["Date Création Article"].dt.strftime('%d/%m/%Y')
                                 output_buffer_new = io.BytesIO()
                                 try:
                                     with pd.ExcelWriter(output_buffer_new, engine="openpyxl") as writer_new:
