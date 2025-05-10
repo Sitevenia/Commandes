@@ -1,4 +1,4 @@
-# --- START OF FINAL COMPLETE CORRECTED app.py (v13 - Robust Handling of Creation Dates) ---
+# --- START OF FINAL COMPLETE CORRECTED app.py (v13 - Robust Handling of Creation Dates, Integrated Special Tab) ---
 
 import streamlit as st
 import pandas as pd
@@ -102,7 +102,7 @@ def safe_read_excel(uploaded_file, sheet_name, **kwargs):
         return df
     except ValueError as e:
         if f"Worksheet named '{sheet_name}' not found" in str(e) or f"'{sheet_name}' not found" in str(e):
-             st.warning(f"⚠️ Onglet '{sheet_name}' non trouvé.")
+             st.warning(f"⚠️ Onglet '{sheet_name}' non trouvé.") # Change to warning as it might be optional
         else: st.error(f"❌ Erreur valeur lecture onglet '{sheet_name}': {e}.")
         return None
     except Exception as e:
@@ -419,17 +419,20 @@ def parse_week_column_to_date(col_name_str):
     return None
 
 def ai_calculate_order_quantities(df_products_for_ai, historical_semaine_cols, num_forecast_weeks,
-                                  min_order_amount_for_subset=0.0, apply_special_rules=True):
+                                  min_order_amount_for_subset=0.0, apply_special_rules=True,
+                                  df_events_global=None):
     if not PROPHET_AVAILABLE: st.error("Librairie Prophet (IA) non installée."); return None, 0.0
     if df_products_for_ai.empty: st.info("Aucune donnée produit pour prévision IA."); return None, 0.0
     base_req_cols = ["Stock", "Conditionnement", "Tarif d'achat", "Référence Article"]
     missing_base = [c for c in base_req_cols if c not in df_products_for_ai.columns and c != "Référence Article"]
     if missing_base: st.error(f"Cols de base manquantes (calcul IA): {', '.join(missing_base)}"); return None, 0.0
+    
     df_calc_ai = df_products_for_ai.copy()
     for col_op in ["Stock", "Conditionnement", "Tarif d'achat"]:
         if col_op in df_calc_ai.columns: df_calc_ai[col_op] = pd.to_numeric(df_calc_ai[col_op], errors='coerce').fillna(0)
         else: st.error(f"Colonne critique '{col_op}' manquante."); return None, 0.0
     df_calc_ai["Conditionnement"] = df_calc_ai["Conditionnement"].apply(lambda x: int(x) if x > 0 else 1)
+    
     parsed_sales_dates = []
     valid_sales_cols_for_model = []
     for col_hist in historical_semaine_cols:
@@ -438,25 +441,202 @@ def ai_calculate_order_quantities(df_products_for_ai, historical_semaine_cols, n
         else: logging.warning(f"Colonne '{col_hist}' ignorée pour IA (parsing date échoué).")
     if not parsed_sales_dates: st.error("Aucune colonne de ventes historiques interprétable comme date pour l'IA."); return None, 0.0
     parsed_sales_df_map = pd.DataFrame(parsed_sales_dates).sort_values(by='date').reset_index(drop=True)
-    for col_valid_ts in valid_sales_cols_for_model:
-        if col_valid_ts in df_calc_ai.columns: df_calc_ai[col_valid_ts] = pd.to_numeric(df_calc_ai[col_valid_ts], errors='coerce')
-        else: logging.warning(f"Col vente hist. '{col_valid_ts}' non trouvée."); df_calc_ai[col_valid_ts] = np.nan
+
+    all_regressor_names = []
+    if df_events_global is not None and not df_events_global.empty and 'TypeEvenement' in df_events_global.columns and 'ModeleImpact' in df_events_global.columns:
+        df_events_global['TypeEvenement'] = df_events_global['TypeEvenement'].astype(str) # Assurer que c'est une chaîne
+        regressors_df = df_events_global[df_events_global['ModeleImpact'].astype(str).str.lower() == 'regresseur']
+        if not regressors_df.empty:
+            all_regressor_names = regressors_df['TypeEvenement'].unique().tolist()
+            all_regressor_names = [re.sub(r'\W+', '_', name).lower() for name in all_regressor_names if isinstance(name, str)]
+
+
     df_calc_ai["Qté Cmdée (IA)"] = 0; df_calc_ai["Forecast Ventes (IA)"] = 0.0
     num_prods = len(df_calc_ai); progress_bar_placeholder = st.empty()
+
     for i, (prod_idx, prod_row) in enumerate(df_calc_ai.iterrows()):
         progress_bar_placeholder.progress((i + 1) / num_prods, text=f"Prévision IA: Article {i+1}/{num_prods}")
         prod_ref_log = prod_row.get("Référence Article", f"Index {prod_idx}")
         logging.info(f"Prévision IA pour: {prod_ref_log}")
+
         prod_ts_hist = [{'ds': ps_row['date'], 'y': prod_row.get(ps_row['col_name'], np.nan)} for _, ps_row in parsed_sales_df_map.iterrows()]
         prod_ts_df_fit = pd.DataFrame(prod_ts_hist).dropna(subset=['ds'])
+
         if prod_ts_df_fit['y'].notna().sum() < 12:
-            logging.warning(f"Produit {prod_ref_log}: <12 points ventes. Prévision IA ignorée."); df_calc_ai.loc[prod_idx, "Qté Cmdée (IA)"] = 0; df_calc_ai.loc[prod_idx, "Forecast Ventes (IA)"] = 0.0; continue
+            logging.warning(f"Produit {prod_ref_log}: <12 points ventes. Prévision IA ignorée.");
+            df_calc_ai.loc[prod_idx, "Qté Cmdée (IA)"] = 0; df_calc_ai.loc[prod_idx, "Forecast Ventes (IA)"] = 0.0; continue
+
+        product_specific_holidays_df = None
+        product_regressors_to_add = {} 
+
+        if df_events_global is not None and not df_events_global.empty and 'Référence Article' in df_events_global.columns:
+            prod_events = df_events_global[df_events_global['Référence Article'] == prod_ref_log].copy() # Use .copy()
+            if not prod_events.empty:
+                prod_holidays_list = []
+                holiday_events_for_prod = prod_events[prod_events['ModeleImpact'].astype(str).str.lower() == 'holiday']
+                for _, event_row in holiday_events_for_prod.iterrows():
+                    holiday_name_clean = re.sub(r'\W+', '_', event_row['TypeEvenement']).lower()
+                    holiday_entry = {'holiday': holiday_name_clean, 'ds': event_row['DateDebut']}
+                    if pd.notna(event_row['DateFin']) and event_row['DateFin'] > event_row['DateDebut']:
+                        date_range = pd.date_range(start=event_row['DateDebut'], end=event_row['DateFin'], freq='D')
+                        for date_in_range in date_range:
+                            prod_holidays_list.append({'holiday': holiday_name_clean, 'ds': date_in_range})
+                    else:
+                        prod_holidays_list.append(holiday_entry)
+                if prod_holidays_list:
+                    product_specific_holidays_df = pd.DataFrame(prod_holidays_list)
+
+                for reg_name_sanitized in all_regressor_names:
+                    # Trouver le TypeEvenement original correspondant au nom sanitizé
+                    original_type_event_for_reg = None
+                    for type_event_unique in prod_events['TypeEvenement'].unique():
+                         if re.sub(r'\W+', '_', str(type_event_unique)).lower() == reg_name_sanitized:
+                            original_type_event_for_reg = type_event_unique
+                            break
+                    
+                    if original_type_event_for_reg is None: # Pas de définition de ce régresseur pour ce produit
+                        prod_ts_df_fit[reg_name_sanitized] = 0.0 # Valeur neutre par défaut
+                        # Pourrait être 1.0 si on savait qu'il était multiplicatif mais il faut l'info
+                        continue 
+
+                    event_reg_data_for_prod = prod_events[
+                        (prod_events['TypeEvenement'] == original_type_event_for_reg) &
+                        (prod_events['ModeleImpact'].astype(str).str.lower() == 'regresseur')
+                    ]
+
+                    default_reg_val = 0.0
+                    if not event_reg_data_for_prod.empty and 'UniteImpact' in event_reg_data_for_prod.columns and \
+                       event_reg_data_for_prod['UniteImpact'].iloc[0].lower() == 'multiplicatif':
+                        default_reg_val = 1.0
+                    
+                    prod_ts_df_fit[reg_name_sanitized] = default_reg_val # Initialiser la colonne pour l'entraînement
+
+                    if not event_reg_data_for_prod.empty:
+                        product_regressors_to_add[reg_name_sanitized] = True # Marquer comme pertinent
+                        for _, reg_row in event_reg_data_for_prod.iterrows():
+                            start_d = reg_row['DateDebut']
+                            end_d = reg_row['DateFin'] if pd.notna(reg_row['DateFin']) else prod_ts_df_fit['ds'].max() + pd.Timedelta(days=730) 
+                            val_impact = reg_row['ValeurImpact']
+                            unit_impact = str(reg_row.get('UniteImpact', '')).lower()
+
+                            if pd.isna(val_impact): continue
+                            
+                            mask = (prod_ts_df_fit['ds'] >= start_d) & (prod_ts_df_fit['ds'] <= end_d)
+                            if unit_impact == 'additifhebdo':
+                                prod_ts_df_fit.loc[mask, reg_name_sanitized] = val_impact
+                            elif unit_impact == 'multiplicatif':
+                                prod_ts_df_fit.loc[mask, reg_name_sanitized] = val_impact
+                            else: # additif direct par défaut
+                                prod_ts_df_fit.loc[mask, reg_name_sanitized] = val_impact
         try:
-            model_prophet = Prophet(uncertainty_samples=0)
+            model_prophet = Prophet(
+                uncertainty_samples=0,
+                holidays=product_specific_holidays_df
+            )
+
+            for reg_name_to_add in all_regressor_names:
+                 if product_regressors_to_add.get(reg_name_to_add):
+                    mode = 'additive'
+                    original_type_for_mode = None
+                    for type_ev_unique_mode in df_events_global['TypeEvenement'].unique():
+                        if re.sub(r'\W+', '_', str(type_ev_unique_mode)).lower() == reg_name_to_add:
+                            original_type_for_mode = type_ev_unique_mode
+                            break
+                    
+                    if original_type_for_mode:
+                        event_for_mode_check = df_events_global[
+                            (df_events_global['TypeEvenement'] == original_type_for_mode) &
+                            (df_events_global['ModeleImpact'].astype(str).str.lower() == 'regresseur')
+                        ]
+                        if not event_for_mode_check.empty and 'UniteImpact' in event_for_mode_check.columns:
+                            if str(event_for_mode_check['UniteImpact'].iloc[0]).lower() == 'multiplicatif':
+                                mode = 'multiplicative'
+                    model_prophet.add_regressor(reg_name_to_add, mode=mode)
+
             if not prod_ts_df_fit.empty and (prod_ts_df_fit['ds'].max() - prod_ts_df_fit['ds'].min()) >= pd.Timedelta(days=365 + 180):
                 model_prophet.add_seasonality(name='yearly', period=365.25, fourier_order=10)
-            with SuppressStdoutStderr(): model_prophet.fit(prod_ts_df_fit[['ds', 'y']].dropna(subset=['y']))
+            
+            with SuppressStdoutStderr():
+                cols_for_fit = ['ds', 'y'] + [r for r in all_regressor_names if r in prod_ts_df_fit.columns and product_regressors_to_add.get(r)]
+                df_fit_final = prod_ts_df_fit[cols_for_fit].dropna(subset=['y'])
+                # S'assurer que toutes les colonnes régresseurs existent, sinon les ajouter avec valeur neutre
+                for r_name_check in all_regressor_names:
+                    if product_regressors_to_add.get(r_name_check) and r_name_check not in df_fit_final.columns:
+                        # Déterminer la valeur neutre (0 pour additif, 1 pour multiplicatif)
+                        is_mult = False
+                        orig_type_for_neutral = None
+                        for type_ev_unique_neut in df_events_global['TypeEvenement'].unique():
+                            if re.sub(r'\W+', '_', str(type_ev_unique_neut)).lower() == r_name_check:
+                                orig_type_for_neutral = type_ev_unique_neut
+                                break
+                        if orig_type_for_neutral:
+                            event_for_neutral_check = df_events_global[
+                                (df_events_global['TypeEvenement'] == orig_type_for_neutral) &
+                                (df_events_global['ModeleImpact'].astype(str).str.lower() == 'regresseur')
+                            ]
+                            if not event_for_neutral_check.empty and 'UniteImpact' in event_for_neutral_check.columns and \
+                               str(event_for_neutral_check['UniteImpact'].iloc[0]).lower() == 'multiplicatif':
+                                is_mult = True
+                        df_fit_final[r_name_check] = 1.0 if is_mult else 0.0
+
+                model_prophet.fit(df_fit_final)
+
             future_df = model_prophet.make_future_dataframe(periods=num_forecast_weeks, freq='W-MON')
+
+            if df_events_global is not None and not df_events_global.empty and product_regressors_to_add:
+                for reg_name_fut in all_regressor_names:
+                    if product_regressors_to_add.get(reg_name_fut):
+                        original_type_event_for_fut = None
+                        for type_ev_unique_fut in df_events_global['TypeEvenement'].unique():
+                            if re.sub(r'\W+', '_', str(type_ev_unique_fut)).lower() == reg_name_fut:
+                                original_type_event_for_fut = type_ev_unique_fut
+                                break
+
+                        event_reg_fut_data = pd.DataFrame()
+                        if original_type_event_for_fut:
+                            event_reg_fut_data = df_events_global[
+                                (df_events_global['Référence Article'] == prod_ref_log) &
+                                (df_events_global['TypeEvenement'] == original_type_event_for_fut) &
+                                (df_events_global['ModeleImpact'].astype(str).str.lower() == 'regresseur')
+                            ]
+                        
+                        default_reg_val_fut = 0.0
+                        if not event_reg_fut_data.empty and 'UniteImpact' in event_reg_fut_data.columns and \
+                           str(event_reg_fut_data['UniteImpact'].iloc[0]).lower() == 'multiplicatif':
+                            default_reg_val_fut = 1.0
+                        future_df[reg_name_fut] = default_reg_val_fut
+
+                        if not event_reg_fut_data.empty:
+                            for _, reg_row_fut in event_reg_fut_data.iterrows():
+                                start_d_fut = reg_row_fut['DateDebut']
+                                end_d_fut = reg_row_fut['DateFin'] if pd.notna(reg_row_fut['DateFin']) else future_df['ds'].max()
+                                val_impact_fut = reg_row_fut['ValeurImpact']
+                                unit_impact_fut = str(reg_row_fut.get('UniteImpact', '')).lower()
+
+                                if pd.isna(val_impact_fut): continue
+
+                                mask_fut = (future_df['ds'] >= start_d_fut) & (future_df['ds'] <= end_d_fut)
+                                if unit_impact_fut == 'additifhebdo': future_df.loc[mask_fut, reg_name_fut] = val_impact_fut
+                                elif unit_impact_fut == 'multiplicatif': future_df.loc[mask_fut, reg_name_fut] = val_impact_fut
+                                else: future_df.loc[mask_fut, reg_name_fut] = val_impact_fut
+                    else: # Régresseur non pertinent pour ce produit, valeur neutre
+                        is_mult_default = False # Déterminer si multiplicatif par défaut
+                        orig_type_for_default_neutral = None
+                        for type_ev_unique_def_neut in df_events_global['TypeEvenement'].unique():
+                            if re.sub(r'\W+', '_', str(type_ev_unique_def_neut)).lower() == reg_name_fut:
+                                orig_type_for_default_neutral = type_ev_unique_def_neut
+                                break
+                        if orig_type_for_default_neutral:
+                             event_for_default_neutral_check = df_events_global[
+                                (df_events_global['TypeEvenement'] == orig_type_for_default_neutral) &
+                                (df_events_global['ModeleImpact'].astype(str).str.lower() == 'regresseur')
+                            ]
+                             if not event_for_default_neutral_check.empty and 'UniteImpact' in event_for_default_neutral_check.columns and \
+                                str(event_for_default_neutral_check['UniteImpact'].iloc[0]).lower() == 'multiplicatif':
+                                 is_mult_default = True
+                        future_df[reg_name_fut] = 1.0 if is_mult_default else 0.0
+
+
             forecast_df_res = model_prophet.predict(future_df)
             total_fcst_period = forecast_df_res['yhat'].iloc[-num_forecast_weeks:].sum()
             total_fcst_period = max(0, total_fcst_period)
@@ -473,7 +653,12 @@ def ai_calculate_order_quantities(df_products_for_ai, historical_semaine_cols, n
                 if actual_recent_cols and df_calc_ai.loc[prod_idx, actual_recent_cols].sum() > 0:
                     order_qty_item_ia = package_item; logging.info(f"Produit {prod_ref_log}: Stock bas, vts récentes, fcst IA=0. Forçage à 1 cond ({package_item}).")
             df_calc_ai.loc[prod_idx, "Qté Cmdée (IA)"] = order_qty_item_ia
-        except Exception as e_ph: logging.error(f"Erreur Prophet pour {prod_ref_log}: {e_ph}"); df_calc_ai.loc[prod_idx, "Qté Cmdée (IA)"] = 0; df_calc_ai.loc[prod_idx, "Forecast Ventes (IA)"] = 0.0
+        except Exception as e_ph: 
+            logging.exception(f"Erreur Prophet pour {prod_ref_log}: {e_ph}") # log avec traceback
+            st.error(f"Erreur IA (produit {prod_ref_log}): {e_ph}. Vérifiez config. événements ou données produit.")
+            df_calc_ai.loc[prod_idx, "Qté Cmdée (IA)"] = 0
+            df_calc_ai.loc[prod_idx, "Forecast Ventes (IA)"] = 0.0
+    
     progress_bar_placeholder.empty()
     df_calc_ai["Total Cmd (€) (IA)"] = df_calc_ai["Qté Cmdée (IA)"] * df_calc_ai["Tarif d'achat"]
     current_total_amount_ia = df_calc_ai["Total Cmd (€) (IA)"].sum()
@@ -513,7 +698,8 @@ def get_default_session_state():
         'ai_commande_result_df': None, 'ai_commande_total_amount': 0.0,
         'ai_commande_params_calculated_for': {}, 'ai_forecast_weeks_val': 4, 'ai_min_order_val': 0.0,
         'ai_ignored_orders_df': None,
-        'ai_excluded_suppliers_stock_target': [], # --- MODIFICATION: Nouvelle clé ---
+        'ai_excluded_suppliers_stock_target': [], 
+        'df_product_events': pd.DataFrame(), # Pour les événements/paramètres IA lus depuis l'onglet "Spécial"
         'supplier_evaluation_data': None, 'global_stock_target_config': 3200000.0,
         'rotation_result_df': None, 'rotation_analysis_period_label': "12 dernières semaines",
         'rotation_suppliers_calculated_for': [], 'rotation_threshold_value': 1.0,
@@ -564,7 +750,6 @@ if uploaded_file and st.session_state.df_full is None:
         else: 
              st.warning("⚠️ Colonne 'Date Création Article' non trouvée. Recherche nouveaux articles désactivée.")
 
-
         for str_c_tf in ["Fournisseur", "AF_RefFourniss", "Référence Article", "Désignation Article"]:
             if str_c_tf in df_full_read.columns: df_full_read[str_c_tf] = df_full_read[str_c_tf].astype(str).str.strip().replace('nan', '')
         st.session_state.df_full = df_full_read
@@ -584,7 +769,7 @@ if uploaded_file and st.session_state.df_full is None:
                     st.success(f"✅ 'Min cmd' lu ({len(min_o_dict_temp_read)} entrées).")
                 except Exception as e_min_proc: st.error(f"❌ Err trait. 'Min cmd': {e_min_proc}")
             else: st.warning(f"⚠️ Cols '{s_col_min}'/'{m_col_min}' manquantes ('Min cmd').")
-        elif df_min_c_read is None: st.info("Onglet 'Min cmd' non trouvé.")
+        elif df_min_c_read is None: st.info("Onglet 'Min cmd' non trouvé.") # C'est une information, pas une erreur critique
         else: st.info("Onglet 'Min cmd' vide.")
         st.session_state.min_order_dict = min_o_dict_temp_read
 
@@ -610,6 +795,51 @@ if uploaded_file and st.session_state.df_full is None:
                 st.session_state.df_suivi_commandes = pd.DataFrame()
         elif df_suivi_read is None: st.info("Onglet 'Suivi cmds' non trouvé.")
         else: st.info("Onglet 'Suivi cmds' vide."); st.session_state.df_suivi_commandes = pd.DataFrame()
+
+        st.info("Lecture onglet 'Spécial' pour paramètres IA avancés...")
+        excel_io_buf.seek(0) 
+        df_events_temp = safe_read_excel(excel_io_buf, sheet_name="Spécial")
+
+        if df_events_temp is not None and not df_events_temp.empty:
+            df_events_temp.columns = df_events_temp.columns.str.strip()
+            required_event_cols = ['Référence Article', 'TypeEvenement', 'DateDebut']
+            
+            missing_cols_special = [col for col in required_event_cols if col not in df_events_temp.columns]
+            if not missing_cols_special:
+                try:
+                    df_events_temp['DateDebut'] = pd.to_datetime(df_events_temp['DateDebut'], errors='coerce')
+                    
+                    if 'DateFin' in df_events_temp.columns: df_events_temp['DateFin'] = pd.to_datetime(df_events_temp['DateFin'], errors='coerce')
+                    else: df_events_temp['DateFin'] = pd.NaT 
+
+                    if 'ValeurImpact' in df_events_temp.columns: df_events_temp['ValeurImpact'] = pd.to_numeric(df_events_temp['ValeurImpact'], errors='coerce')
+                    else: df_events_temp['ValeurImpact'] = np.nan
+
+                    if 'UniteImpact' not in df_events_temp.columns: df_events_temp['UniteImpact'] = 'Multiplicatif' 
+                    
+                    if 'ModeleImpact' not in df_events_temp.columns: df_events_temp['ModeleImpact'] = 'Regresseur' 
+                    else: df_events_temp['ModeleImpact'] = df_events_temp['ModeleImpact'].astype(str).str.lower()
+
+                    df_events_processed = df_events_temp.dropna(
+                        subset=['Référence Article', 'TypeEvenement', 'DateDebut', 'ModeleImpact']
+                    ).copy()
+                    
+                    if 'TypeEvenement' in df_events_processed.columns:
+                         df_events_processed['TypeEvenement'] = df_events_processed['TypeEvenement'].astype(str)
+                    st.session_state.df_product_events = df_events_processed
+                    st.success(f"✅ Onglet 'Spécial' lu ({len(st.session_state.df_product_events)} événements/paramètres IA).")
+                except Exception as e:
+                    st.warning(f"⚠️ Erreur traitement onglet 'Spécial': {e}. Paramètres IA avancés ignorés.")
+                    st.session_state.df_product_events = pd.DataFrame()
+            else:
+                st.warning(f"⚠️ Onglet 'Spécial' trouvé, mais colonnes requises manquantes: {', '.join(missing_cols_special)}. Paramètres IA avancés ignorés.")
+                st.session_state.df_product_events = pd.DataFrame()
+        elif df_events_temp is None: # safe_read_excel retourne None si onglet non trouvé
+            st.info("ℹ️ Onglet 'Spécial' non trouvé. Aucuns paramètres IA avancés chargés depuis cet onglet.")
+            st.session_state.df_product_events = pd.DataFrame() 
+        else: 
+            st.info("ℹ️ Onglet 'Spécial' est vide. Aucuns paramètres IA avancés chargés.")
+            st.session_state.df_product_events = pd.DataFrame()
 
         df_full_state = st.session_state.df_full
         df_init_filt_temp_read = df_full_state[
@@ -840,7 +1070,6 @@ if 'df_initial_filtered' in st.session_state and isinstance(st.session_state.df_
                 st.session_state.ai_forecast_weeks_val = fcst_w_ai_t1
                 st.session_state.ai_min_order_val = min_amt_ai_t1
 
-                # --- START MODIFICATION: UI pour exclure fournisseurs ---
                 st.markdown("##### Exclure des Fournisseurs de l'Ajustement Objectif Stock Max")
                 suppliers_available_for_exclusion_t1_ai = []
                 if sel_f_t1_ai and not df_disp_t1_ai.empty and 'Fournisseur' in df_disp_t1_ai.columns:
@@ -849,35 +1078,39 @@ if 'df_initial_filtered' in st.session_state and isinstance(st.session_state.df_
                 if not suppliers_available_for_exclusion_t1_ai:
                     st.caption("Aucun fournisseur actuellement sélectionné pour la prévision IA ou données fournisseur manquantes.")
                 else:
-                    # S'assurer que les fournisseurs exclus stockés sont valides par rapport à la sélection actuelle
                     valid_excluded_suppliers = [
                         s for s in st.session_state.get('ai_excluded_suppliers_stock_target', []) 
                         if s in suppliers_available_for_exclusion_t1_ai
                     ]
-                    # Mettre à jour la session state SEULEMENT si la liste des valides est différente de celle en cours, 
-                    # pour éviter des re-render inutiles si l'utilisateur n'a rien changé mais que la liste des options a changé.
                     if st.session_state.get('ai_excluded_suppliers_stock_target') != valid_excluded_suppliers:
                         st.session_state.ai_excluded_suppliers_stock_target = valid_excluded_suppliers
                     
                     excluded_suppliers_ui_t1_ai = st.multiselect(
                         "Fournisseurs à NE PAS soumettre à la règle de valeur de stock max:",
                         options=suppliers_available_for_exclusion_t1_ai,
-                        default=st.session_state.ai_excluded_suppliers_stock_target, # Utilise la valeur nettoyée
-                        key="excluded_supp_stock_target_ui_t1_ai", # Clé unique pour le widget
+                        default=st.session_state.ai_excluded_suppliers_stock_target,
+                        key="excluded_supp_stock_target_ui_t1_ai",
                         help="Les commandes pour ces fournisseurs ne seront pas réduites si elles dépassent leur objectif de valeur de stock."
                     )
-                    # Toujours mettre à jour la session state avec la sélection de l'UI
                     st.session_state.ai_excluded_suppliers_stock_target = excluded_suppliers_ui_t1_ai
-                # --- END MODIFICATION: UI pour exclure fournisseurs ---
-
 
                 if st.button("🚀 Calculer Qtés avec IA", key="calc_q_ai_b_t1_go"):
+                    events_hash = 0
+                    df_events_state = st.session_state.get('df_product_events', pd.DataFrame())
+                    if not df_events_state.empty:
+                        try:
+                            events_hash = pd.util.hash_pandas_object(df_events_state, index=True).sum()
+                        except Exception as e_hash:
+                            logging.warning(f"Could not hash df_product_events: {e_hash}")
+
+
                     curr_calc_params_t1_ai = {
                         'suppliers': sel_f_t1_ai,
                         'forecast_weeks': fcst_w_ai_t1,
                         'min_amount_ui': min_amt_ai_t1,
-                        'excluded_suppliers_stock_target': st.session_state.get('ai_excluded_suppliers_stock_target', []), # --- MODIFICATION: Ajouter aux paramètres ---
-                        'sem_cols_hash': hash(tuple(id_sem_cols))
+                        'excluded_suppliers_stock_target': st.session_state.get('ai_excluded_suppliers_stock_target', []), 
+                        'sem_cols_hash': hash(tuple(id_sem_cols)),
+                        'events_hash': events_hash 
                     }
                     st.session_state.ai_commande_params_calculated_for = curr_calc_params_t1_ai
 
@@ -890,7 +1123,11 @@ if 'df_initial_filtered' in st.session_state and isinstance(st.session_state.df_
                         sup_specific_min_order_ai = min_amt_ai_t1 if len(sel_f_t1_ai) == 1 else min_o_amts.get(sup_name_proc_ai, 0.0)
                         if not df_sup_subset_ai_proc.empty:
                             ai_res_df_sup, _ = ai_calculate_order_quantities(
-                                df_sup_subset_ai_proc, id_sem_cols, fcst_w_ai_t1, sup_specific_min_order_ai
+                                df_sup_subset_ai_proc, 
+                                id_sem_cols, 
+                                fcst_w_ai_t1, 
+                                sup_specific_min_order_ai,
+                                df_events_global=st.session_state.get('df_product_events', pd.DataFrame())
                             )
                             if ai_res_df_sup is not None: res_dfs_list_ai_calc.append(ai_res_df_sup)
                             else: st.error(f"Échec calcul IA pour: {sup_name_proc_ai}"); calc_ok_overall_ai = False
@@ -936,17 +1173,13 @@ if 'df_initial_filtered' in st.session_state and isinstance(st.session_state.df_
                             df_all_items_for_selected_suppliers_ui = df_disp_t1_ai[df_disp_t1_ai['Fournisseur'].isin(suppliers_in_current_command)].copy()
                             df_to_adjust_iteratively = df_final_after_all_filters.copy()
 
-                            # --- START MODIFICATION: Récupérer les fournisseurs exclus ---
                             excluded_suppliers_from_target_rule = st.session_state.get('ai_excluded_suppliers_stock_target', [])
-                            # --- END MODIFICATION ---
 
                             for supplier_name_adj in suppliers_in_current_command:
-                                # --- START MODIFICATION: Vérifier si le fournisseur est exclu ---
                                 if supplier_name_adj in excluded_suppliers_from_target_rule:
                                     st.caption(f"Fournisseur {supplier_name_adj} : Exclu de l'ajustement de l'objectif de stock max.")
                                     logging.info(f"Supplier {supplier_name_adj} is excluded from max stock target adjustment.")
-                                    continue # Passer au fournisseur suivant
-                                # --- END MODIFICATION ---
+                                    continue 
 
                                 supplier_target_data = st.session_state.supplier_evaluation_data.get(supplier_name_adj)
                                 if not supplier_target_data or 'max_stock_target' not in supplier_target_data:
@@ -1063,12 +1296,21 @@ if 'df_initial_filtered' in st.session_state and isinstance(st.session_state.df_
                         st.rerun()
 
                 if 'ai_commande_result_df' in st.session_state and st.session_state.ai_commande_result_df is not None:
+                    events_hash_disp = 0
+                    df_events_state_disp = st.session_state.get('df_product_events', pd.DataFrame())
+                    if not df_events_state_disp.empty:
+                        try:
+                            events_hash_disp = pd.util.hash_pandas_object(df_events_state_disp, index=True).sum()
+                        except Exception as e_hash_disp:
+                             logging.warning(f"Could not hash df_product_events for display check: {e_hash_disp}")
+                    
                     curr_ui_params_t1_ai_disp = {
                         'suppliers': sel_f_t1_ai,
                         'forecast_weeks': fcst_w_ai_t1,
                         'min_amount_ui': min_amt_ai_t1,
-                        'excluded_suppliers_stock_target': st.session_state.get('ai_excluded_suppliers_stock_target', []), # --- MODIFICATION: Vérifier aussi ce paramètre ---
-                        'sem_cols_hash': hash(tuple(id_sem_cols))
+                        'excluded_suppliers_stock_target': st.session_state.get('ai_excluded_suppliers_stock_target', []), 
+                        'sem_cols_hash': hash(tuple(id_sem_cols)),
+                        'events_hash': events_hash_disp 
                     }
                     if st.session_state.get('ai_commande_params_calculated_for') == curr_ui_params_t1_ai_disp:
                         st.markdown("---")
