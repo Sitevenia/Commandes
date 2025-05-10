@@ -513,6 +513,7 @@ def get_default_session_state():
         'ai_commande_result_df': None, 'ai_commande_total_amount': 0.0,
         'ai_commande_params_calculated_for': {}, 'ai_forecast_weeks_val': 4, 'ai_min_order_val': 0.0,
         'ai_ignored_orders_df': None,
+        'ai_excluded_suppliers_stock_target': [], # --- MODIFICATION: Nouvelle clé ---
         'supplier_evaluation_data': None, 'global_stock_target_config': 3200000.0,
         'rotation_result_df': None, 'rotation_analysis_period_label': "12 dernières semaines",
         'rotation_suppliers_calculated_for': [], 'rotation_threshold_value': 1.0,
@@ -545,7 +546,6 @@ if uploaded_file and st.session_state.df_full is None:
         df_full_read = safe_read_excel(excel_io_buf, sheet_name="Tableau final", header=7)
         if df_full_read is None or df_full_read.empty: st.error("❌ Échec lecture 'Tableau final' ou onglet vide."); st.stop()
         
-        # Ajout de "Date Création Article" dans les colonnes requises pour la vérification
         req_tf_cols_check = ["Stock", "Fournisseur", "AF_RefFourniss", "Tarif d'achat", "Conditionnement", "Référence Article", "Désignation Article", "Date Création Article"]
         missing_tf_check = [c for c in req_tf_cols_check if c not in df_full_read.columns]
         if missing_tf_check: st.error(f"❌ Cols manquantes ('TF'): {', '.join(missing_tf_check)}. Vérifiez ligne en-tête (L8)."); st.stop()
@@ -561,7 +561,7 @@ if uploaded_file and st.session_state.df_full is None:
                     st.warning("⚠️ Certaines dates de création d'article n'ont pas pu être lues et seront ignorées pour la recherche de nouveaux articles.")
             except Exception as e_date_creation:
                 st.error(f"❌ Erreur conversion 'Date Création Article': {e_date_creation}.")
-        else: # Should be caught by missing_tf_check, but good to have a specific warning
+        else: 
              st.warning("⚠️ Colonne 'Date Création Article' non trouvée. Recherche nouveaux articles désactivée.")
 
 
@@ -670,7 +670,6 @@ if 'df_initial_filtered' in st.session_state and isinstance(st.session_state.df_
 
     # --- Tab 1: Classic Order Forecast ---
     with tab1:
-        # ... (Code identique) ...
         st.header("Prévision des Quantités à Commander (Méthode Classique)")
         sel_f_t1 = render_supplier_checkboxes("tab1", all_sups_data, default_select_all=True)
         df_disp_t1 = pd.DataFrame()
@@ -841,11 +840,43 @@ if 'df_initial_filtered' in st.session_state and isinstance(st.session_state.df_
                 st.session_state.ai_forecast_weeks_val = fcst_w_ai_t1
                 st.session_state.ai_min_order_val = min_amt_ai_t1
 
+                # --- START MODIFICATION: UI pour exclure fournisseurs ---
+                st.markdown("##### Exclure des Fournisseurs de l'Ajustement Objectif Stock Max")
+                suppliers_available_for_exclusion_t1_ai = []
+                if sel_f_t1_ai and not df_disp_t1_ai.empty and 'Fournisseur' in df_disp_t1_ai.columns:
+                    suppliers_available_for_exclusion_t1_ai = sorted(df_disp_t1_ai['Fournisseur'].astype(str).unique().tolist())
+                
+                if not suppliers_available_for_exclusion_t1_ai:
+                    st.caption("Aucun fournisseur actuellement sélectionné pour la prévision IA ou données fournisseur manquantes.")
+                else:
+                    # S'assurer que les fournisseurs exclus stockés sont valides par rapport à la sélection actuelle
+                    valid_excluded_suppliers = [
+                        s for s in st.session_state.get('ai_excluded_suppliers_stock_target', []) 
+                        if s in suppliers_available_for_exclusion_t1_ai
+                    ]
+                    # Mettre à jour la session state SEULEMENT si la liste des valides est différente de celle en cours, 
+                    # pour éviter des re-render inutiles si l'utilisateur n'a rien changé mais que la liste des options a changé.
+                    if st.session_state.get('ai_excluded_suppliers_stock_target') != valid_excluded_suppliers:
+                        st.session_state.ai_excluded_suppliers_stock_target = valid_excluded_suppliers
+                    
+                    excluded_suppliers_ui_t1_ai = st.multiselect(
+                        "Fournisseurs à NE PAS soumettre à la règle de valeur de stock max:",
+                        options=suppliers_available_for_exclusion_t1_ai,
+                        default=st.session_state.ai_excluded_suppliers_stock_target, # Utilise la valeur nettoyée
+                        key="excluded_supp_stock_target_ui_t1_ai", # Clé unique pour le widget
+                        help="Les commandes pour ces fournisseurs ne seront pas réduites si elles dépassent leur objectif de valeur de stock."
+                    )
+                    # Toujours mettre à jour la session state avec la sélection de l'UI
+                    st.session_state.ai_excluded_suppliers_stock_target = excluded_suppliers_ui_t1_ai
+                # --- END MODIFICATION: UI pour exclure fournisseurs ---
+
+
                 if st.button("🚀 Calculer Qtés avec IA", key="calc_q_ai_b_t1_go"):
                     curr_calc_params_t1_ai = {
                         'suppliers': sel_f_t1_ai,
                         'forecast_weeks': fcst_w_ai_t1,
                         'min_amount_ui': min_amt_ai_t1,
+                        'excluded_suppliers_stock_target': st.session_state.get('ai_excluded_suppliers_stock_target', []), # --- MODIFICATION: Ajouter aux paramètres ---
                         'sem_cols_hash': hash(tuple(id_sem_cols))
                     }
                     st.session_state.ai_commande_params_calculated_for = curr_calc_params_t1_ai
@@ -896,7 +927,6 @@ if 'df_initial_filtered' in st.session_state and isinstance(st.session_state.df_
                              df_after_350_filter = df_before_350_filter
                              st.session_state.ai_ignored_orders_df = pd.DataFrame()
                         
-                        # --- AJUSTEMENT POUR OBJECTIF STOCK MAX FOURNISSEUR (AVEC SRM ET RELAXATION) ---
                         df_final_after_all_filters = df_after_350_filter.copy()
 
                         if st.session_state.supplier_evaluation_data and not df_final_after_all_filters.empty:
@@ -906,7 +936,18 @@ if 'df_initial_filtered' in st.session_state and isinstance(st.session_state.df_
                             df_all_items_for_selected_suppliers_ui = df_disp_t1_ai[df_disp_t1_ai['Fournisseur'].isin(suppliers_in_current_command)].copy()
                             df_to_adjust_iteratively = df_final_after_all_filters.copy()
 
+                            # --- START MODIFICATION: Récupérer les fournisseurs exclus ---
+                            excluded_suppliers_from_target_rule = st.session_state.get('ai_excluded_suppliers_stock_target', [])
+                            # --- END MODIFICATION ---
+
                             for supplier_name_adj in suppliers_in_current_command:
+                                # --- START MODIFICATION: Vérifier si le fournisseur est exclu ---
+                                if supplier_name_adj in excluded_suppliers_from_target_rule:
+                                    st.caption(f"Fournisseur {supplier_name_adj} : Exclu de l'ajustement de l'objectif de stock max.")
+                                    logging.info(f"Supplier {supplier_name_adj} is excluded from max stock target adjustment.")
+                                    continue # Passer au fournisseur suivant
+                                # --- END MODIFICATION ---
+
                                 supplier_target_data = st.session_state.supplier_evaluation_data.get(supplier_name_adj)
                                 if not supplier_target_data or 'max_stock_target' not in supplier_target_data:
                                     logging.warning(f"Pas de données d'objectif stock pour fournisseur {supplier_name_adj}."); continue
@@ -988,8 +1029,6 @@ if 'df_initial_filtered' in st.session_state and isinstance(st.session_state.df_
                              df_to_adjust_iteratively['Total Cmd (€) (IA)'] = df_to_adjust_iteratively['Qté Cmdée (IA)'] * df_to_adjust_iteratively["Tarif d'achat"]
                              df_to_adjust_iteratively['Stock Terme (IA)'] = df_to_adjust_iteratively['Stock'] + df_to_adjust_iteratively['Qté Cmdée (IA)']
                         df_final_after_all_filters = df_to_adjust_iteratively
-                        # --- FIN AJUSTEMENT OBJECTIF STOCK FOURNISSEUR ---
-
                         st.session_state.ai_commande_result_df = df_final_after_all_filters
                         st.session_state.ai_commande_total_amount = df_final_after_all_filters['Total Cmd (€) (IA)'].sum() if not df_final_after_all_filters.empty else 0.0
                         st.rerun()
@@ -998,7 +1037,7 @@ if 'df_initial_filtered' in st.session_state and isinstance(st.session_state.df_
                         st.error("❌ Aucun résultat IA n'a pu être généré.")
                         st.session_state.ai_commande_result_df = pd.DataFrame(); st.session_state.ai_commande_total_amount = 0.0
                         st.session_state.ai_ignored_orders_df = pd.DataFrame()
-                    else: # Partial success
+                    else: 
                         st.warning("Certains calculs IA ont échoué. Filtre 350€ appliqué, ajustement objectif stock non appliqué sur résultats partiels.")
                         df_after_350_filter = pd.DataFrame(); df_ignored_partial = pd.DataFrame()
                         if res_dfs_list_ai_calc:
@@ -1023,12 +1062,12 @@ if 'df_initial_filtered' in st.session_state and isinstance(st.session_state.df_
                         st.session_state.ai_ignored_orders_df = df_ignored_partial
                         st.rerun()
 
-                # --- Display Results ---
                 if 'ai_commande_result_df' in st.session_state and st.session_state.ai_commande_result_df is not None:
                     curr_ui_params_t1_ai_disp = {
                         'suppliers': sel_f_t1_ai,
                         'forecast_weeks': fcst_w_ai_t1,
                         'min_amount_ui': min_amt_ai_t1,
+                        'excluded_suppliers_stock_target': st.session_state.get('ai_excluded_suppliers_stock_target', []), # --- MODIFICATION: Vérifier aussi ce paramètre ---
                         'sem_cols_hash': hash(tuple(id_sem_cols))
                     }
                     if st.session_state.get('ai_commande_params_calculated_for') == curr_ui_params_t1_ai_disp:
@@ -1070,7 +1109,6 @@ if 'df_initial_filtered' in st.session_state and isinstance(st.session_state.df_
                             else:
                                 st.dataframe(df_disp_ai_res_final[disp_cols_ai_final].style.format(fmts_ai_final,na_rep="-",thousands=","))
 
-                        # Export Final Results
                         st.markdown("#### Export Commandes Prévision IA")
                         df_exp_ai_final_dl = df_disp_ai_res_final[df_disp_ai_res_final["Qté Cmdée (IA)"] > 0].copy()
 
@@ -1129,7 +1167,6 @@ if 'df_initial_filtered' in st.session_state and isinstance(st.session_state.df_
                             except Exception as e_wrt_ai_dl:logging.exception(f"Err ExcelWriter cmd IA: {e_wrt_ai_dl}");st.error("Erreur export commandes IA.")
                         else:st.info("Aucun article qté IA > 0 à exporter après filtres.")
 
-                        # --- Export Ignored Orders ---
                         if 'ai_ignored_orders_df' in st.session_state and st.session_state.ai_ignored_orders_df is not None and not st.session_state.ai_ignored_orders_df.empty:
                             st.markdown("---")
                             st.markdown("##### Export Commandes Ignorées par IA (< 350€ sans stock nég.)")
@@ -1155,7 +1192,6 @@ if 'df_initial_filtered' in st.session_state and isinstance(st.session_state.df_
                                             n_r_ign = len(df_sheet_ignored_export)
                                             if n_r_ign > 0 and "Total Cmd (€) (IA)" in cols_to_write_sheet_ignored and "Désignation Article" in cols_to_write_sheet_ignored:
                                                 t_col_ign_letter = get_column_letter(cols_to_write_sheet_ignored.index("Total Cmd (€) (IA)") + 1)
-                                                # Safe way to get index for label column
                                                 lbl_col_ign_name = "Désignation Article" if "Désignation Article" in cols_to_write_sheet_ignored else (cols_to_write_sheet_ignored[0] if cols_to_write_sheet_ignored else "A")
                                                 lbl_col_ign_idx = cols_to_write_sheet_ignored.index(lbl_col_ign_name) +1 if lbl_col_ign_name in cols_to_write_sheet_ignored else 1
 
@@ -1178,7 +1214,6 @@ if 'df_initial_filtered' in st.session_state and isinstance(st.session_state.df_
 
     # --- Tab 2: Stock Rotation Analysis ---
     with tab2:
-        # ... (Code Tab 2 identique) ...
         st.header("Analyse de la Rotation des Stocks")
         sel_f_t2 = render_supplier_checkboxes("tab2", all_sups_data, default_select_all=True)
         df_disp_t2 = pd.DataFrame()
@@ -1443,7 +1478,7 @@ if 'df_initial_filtered' in st.session_state and isinstance(st.session_state.df_
                     default_start_date = max(min_date_possible, pd.Timestamp.now() - pd.DateOffset(months=1))
                     start_date = st.date_input(
                         "Afficher les articles créés à partir du :",
-                        value=default_start_date.date(), # Ensure it's a date object
+                        value=default_start_date.date(), 
                         min_value=min_date_possible.date(),
                         max_value=max_date_possible.date(),
                         key="new_article_start_date"
@@ -1452,9 +1487,7 @@ if 'df_initial_filtered' in st.session_state and isinstance(st.session_state.df_
                         start_datetime = pd.to_datetime(start_date)
                         source_df_for_new_articles = st.session_state.df_initial_filtered if not st.session_state.df_initial_filtered.empty else st.session_state.df_full
                         if "Date Création Article" in source_df_for_new_articles.columns:
-                            # Make a copy for modification to avoid SettingWithCopyWarning
                             df_to_filter = source_df_for_new_articles.copy()
-                            # Ensure the date column is datetime, coercing errors (should be done at load, but good check)
                             if not pd.api.types.is_datetime64_any_dtype(df_to_filter["Date Création Article"]):
                                 df_to_filter.loc[:, "Date Création Article"] = pd.to_datetime(df_to_filter["Date Création Article"], errors='coerce')
 
@@ -1482,7 +1515,7 @@ if 'df_initial_filtered' in st.session_state and isinstance(st.session_state.df_
                                             sheet_name_new = sanitize_sheet_name(f"Nouveaux_Articles_depuis_{start_date.strftime('%Y%m%d')}")
                                             df_export_new_articles.to_excel(writer_new, sheet_name=sheet_name_new, index=False)
                                             ws_new = writer_new.sheets[sheet_name_new]
-                                            new_article_fmts = {} # "Date Création Article" est déjà strftime
+                                            new_article_fmts = {} 
                                             format_excel_sheet(ws_new, df_export_new_articles, column_formats=new_article_fmts)
                                         output_buffer_new.seek(0)
                                         file_name_new = f"nouveaux_articles_depuis_{start_date.strftime('%Y%m%d')}_{pd.Timestamp.now():%Y%m%d_%H%M}.xlsx"
@@ -1496,7 +1529,6 @@ if 'df_initial_filtered' in st.session_state and isinstance(st.session_state.df_
                             else: st.info("Aucun nouvel article trouvé pour la période sélectionnée.")
                         else: st.error("Colonne 'Date Création Article' non utilisable. Vérifiez le fichier.")
 
-# Fallback if no file is uploaded or if data loading failed and state was reset
 elif not uploaded_file:
     st.info("👋 Bienvenue ! Chargez votre fichier Excel principal pour démarrer.")
     if st.button("🔄 Réinitialiser l'Application"):
