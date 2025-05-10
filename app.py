@@ -1,4 +1,4 @@
-# --- START OF FINAL COMPLETE CORRECTED app.py (v19 - WoS Sales Lookup Fix) ---
+# --- START OF FINAL COMPLETE CORRECTED app.py (v20 - Event Handling Debug) ---
 
 import streamlit as st
 import pandas as pd
@@ -448,8 +448,9 @@ def ai_calculate_order_quantities(df_products_for_ai, historical_semaine_cols, n
 
     for i, (prod_idx, prod_row) in enumerate(df_calc_ai.iterrows()):
         progress_bar_placeholder.progress((i + 1) / num_prods, text=f"Prévision IA: Article {i+1}/{num_prods}")
-        prod_ref_log = prod_row.get("Référence Article", f"Index {prod_idx}")
-        logging.info(f"Prévision IA pour: {prod_ref_log}")
+        prod_ref_log = str(prod_row.get("Référence Article", f"Index {prod_idx}")).strip() # Ensure string and stripped
+        # logging.info(f"Prévision IA pour: {prod_ref_log}") # Can be verbose, enable if needed
+        
         prod_ts_hist = [{'ds': ps_row['date'], 'y': prod_row.get(ps_row['col_name'], np.nan)} for _, ps_row in parsed_sales_df_map.iterrows()]
         prod_ts_df_fit = pd.DataFrame(prod_ts_hist).dropna(subset=['ds'])
         if prod_ts_df_fit['y'].notna().sum() < 12:
@@ -457,22 +458,41 @@ def ai_calculate_order_quantities(df_products_for_ai, historical_semaine_cols, n
         try:
             model_prophet = Prophet(uncertainty_samples=0)
             holidays_df_for_prophet = None
-            if product_events_list and prod_ref_log: 
-                current_product_events_prophet = [
-                    {'holiday': event['event_name'], 'ds': event['ds'], 'lower_window': 0, 'upper_window': 0}
-                    for event in product_events_list
-                    if event.get("product_ref") == prod_ref_log and pd.notna(event.get('ds'))
-                ]
+
+            if product_events_list and prod_ref_log:
+                current_product_events_prophet = []
+                for event in product_events_list:
+                    event_prod_ref = event.get("product_ref")
+                    if event_prod_ref is not None and str(event_prod_ref).strip() == prod_ref_log and pd.notna(event.get('ds')):
+                        current_product_events_prophet.append({
+                            'holiday': str(event['event_name']).strip(), 
+                            'ds': event['ds'], # Should be datetime from creation
+                            'lower_window': 0,
+                            'upper_window': 0
+                        })
+                
                 if current_product_events_prophet:
                     holidays_df_for_prophet = pd.DataFrame(current_product_events_prophet)
-                    holidays_df_for_prophet['ds'] = pd.to_datetime(holidays_df_for_prophet['ds'])
-            
+                    if not holidays_df_for_prophet.empty and 'ds' in holidays_df_for_prophet.columns:
+                        if not pd.api.types.is_datetime64_any_dtype(holidays_df_for_prophet['ds']):
+                            logging.error(f"Pour {prod_ref_log}: La colonne 'ds' dans holidays_df_for_prophet n'est PAS datetime! Conversion.")
+                            holidays_df_for_prophet['ds'] = pd.to_datetime(holidays_df_for_prophet['ds'], errors='coerce')
+                        
+                        holidays_df_for_prophet = holidays_df_for_prophet.dropna(subset=['ds', 'holiday']) # Drop rows if conversion failed or holiday name is bad
+                        if holidays_df_for_prophet.empty:
+                            logging.warning(f"Pour {prod_ref_log}: holidays_df_for_prophet est vide après dropna. Aucun événement valide.")
+                            holidays_df_for_prophet = None # Reset to None if all events became invalid
+                    else: # DataFrame became empty or 'ds' column was missing
+                        holidays_df_for_prophet = None
+
             if not prod_ts_df_fit.empty and 'ds' in prod_ts_df_fit.columns and pd.api.types.is_datetime64_any_dtype(prod_ts_df_fit['ds']):
                 if (prod_ts_df_fit['ds'].max() - prod_ts_df_fit['ds'].min()) >= pd.Timedelta(days=365 + 180): 
                     model_prophet.add_seasonality(name='yearly', period=365.25, fourier_order=10)
             
-            with SuppressStdoutStderr():
-                model_prophet.fit(prod_ts_df_fit[['ds', 'y']].dropna(subset=['y']), holidays=holidays_df_for_prophet)
+            # Temporarily remove SuppressStdoutStderr for debugging fit if issues persist
+            # with SuppressStdoutStderr():
+            model_prophet.fit(prod_ts_df_fit[['ds', 'y']].dropna(subset=['y']), holidays=holidays_df_for_prophet)
+            
             future_df = model_prophet.make_future_dataframe(periods=num_forecast_weeks, freq='W-MON')
             forecast_df_res = model_prophet.predict(future_df)
             total_fcst_period = forecast_df_res['yhat'].iloc[-num_forecast_weeks:].sum()
@@ -486,12 +506,15 @@ def ai_calculate_order_quantities(df_products_for_ai, historical_semaine_cols, n
                 else: logging.warning(f"Produit {prod_ref_log}: Cond. {package_item} invalide. Cmd IA=0.")
             if apply_special_rules and order_qty_item_ia == 0 and stock_item <= 1 and package_item > 0:
                 recent_sales_cols_chk = [psc_row['col_name'] for psc_row in parsed_sales_df_map.tail(12).to_dict('records')]
-                actual_recent_cols = [c for c in recent_sales_cols_chk if c in df_calc_ai.columns] # Check against df_calc_ai for existing sales columns
-                # Ensure we use .loc with the correct index (prod_idx) for df_calc_ai
+                actual_recent_cols = [c for c in recent_sales_cols_chk if c in df_calc_ai.columns] 
                 if actual_recent_cols and df_calc_ai.loc[prod_idx, actual_recent_cols].sum() > 0:
                     order_qty_item_ia = package_item; logging.info(f"Produit {prod_ref_log}: Stock bas, vts récentes, fcst IA=0. Forçage à 1 cond ({package_item}).")
             df_calc_ai.loc[prod_idx, "Qté Cmdée (IA)"] = order_qty_item_ia
-        except Exception as e_ph: logging.error(f"Erreur Prophet pour {prod_ref_log}: {e_ph}"); df_calc_ai.loc[prod_idx, "Qté Cmdée (IA)"] = 0; df_calc_ai.loc[prod_idx, "Forecast Ventes (IA)"] = 0.0
+        except Exception as e_ph: 
+            logging.error(f"Erreur Prophet pour {prod_ref_log}: {e_ph}")
+            # st.toast(f"Erreur Prophet pour {prod_ref_log}: {e_ph}", icon="🔥") # Dev only
+            df_calc_ai.loc[prod_idx, "Qté Cmdée (IA)"] = 0
+            df_calc_ai.loc[prod_idx, "Forecast Ventes (IA)"] = 0.0
     progress_bar_placeholder.empty()
     df_calc_ai["Total Cmd (€) (IA)"] = df_calc_ai["Qté Cmdée (IA)"] * df_calc_ai["Tarif d'achat"]
     current_total_amount_ia = df_calc_ai["Total Cmd (€) (IA)"].sum()
@@ -670,7 +693,7 @@ if uploaded_file and st.session_state.df_full is None:
 
 # --- Main App UI ---
 if 'df_initial_filtered' in st.session_state and isinstance(st.session_state.df_initial_filtered, pd.DataFrame):
-    df_base_tabs = st.session_state.df_initial_filtered # This is df_initial_filtered
+    df_base_tabs = st.session_state.df_initial_filtered 
     all_sups_data = st.session_state.unique_suppliers_list
     min_o_amts = st.session_state.min_order_dict
     id_sem_cols = st.session_state.all_available_semaine_columns
@@ -819,7 +842,6 @@ if 'df_initial_filtered' in st.session_state and isinstance(st.session_state.df_
                             st.info("Ajustement des commandes pour respecter les objectifs de valeur de stock max par fournisseur.")
                             
                             suppliers_in_current_command_eval = df_to_adjust_iteratively['Fournisseur'].unique()
-                            # df_all_items_for_selected_suppliers_ui_eval is based on df_disp_t1_ai which is a subset of df_base_tabs
                             df_all_items_for_selected_suppliers_ui_eval = df_disp_t1_ai[df_disp_t1_ai['Fournisseur'].isin(suppliers_in_current_command_eval)].copy()
                             
                             excluded_suppliers_for_adjustment = st.session_state.get('ai_excluded_suppliers_from_stock_target', [])
@@ -835,8 +857,6 @@ if 'df_initial_filtered' in st.session_state and isinstance(st.session_state.df_
                                     logging.warning(f"Pas de données d'objectif stock pour fournisseur {supplier_name_adj_eval}."); continue
                                 max_stock_target_for_supplier_eval = supplier_target_data_eval['max_stock_target']
                                 
-                                # This DataFrame contains all items for the current supplier being evaluated,
-                                # from the initial selection (df_disp_t1_ai). It should have original sales data.
                                 df_supplier_all_items_from_initial_selection = df_all_items_for_selected_suppliers_ui_eval[
                                     df_all_items_for_selected_suppliers_ui_eval['Fournisseur'] == supplier_name_adj_eval
                                 ]
@@ -867,31 +887,27 @@ if 'df_initial_filtered' in st.session_state and isinstance(st.session_state.df_
                                     
                                     df_supplier_command_items_adj_eval['WoS_Calculated_Supplier'] = np.inf
                                     df_supplier_command_items_adj_eval['SRM_Qty'] = 0
-                                    if weeks_to_use_for_wos_supplier_eval > 0:
+                                    if weeks_to_use_for_wos_supplier_eval > 0 and not df_base_tabs.empty: # Ensure df_base_tabs is available
                                         semaine_cols_for_wos_sup_eval = id_sem_cols[-weeks_to_use_for_wos_supplier_eval:]
                                         for item_idx_wos, item_row_wos in df_supplier_command_items_adj_eval.iterrows():
                                             original_item_sales_data_series_eval = pd.Series(dtype='float64')
-                                            
                                             ref_art_current_item_eval = item_row_wos.get('Référence Article')
-                                            current_stock_item_wos_eval = item_row_wos['Stock'] # Stock from the *commanded* item
+                                            current_stock_item_wos_eval = item_row_wos['Stock'] 
                                             
                                             if ref_art_current_item_eval:
-                                                # Fetch sales data from df_base_tabs (the initial filtered data)
-                                                # This ensures we use the comprehensive sales history for WoS.
                                                 matching_rows_in_base = df_base_tabs[
                                                     (df_base_tabs['Référence Article'] == ref_art_current_item_eval) &
-                                                    (df_base_tabs['Fournisseur'] == supplier_name_adj_eval) # Filter by supplier too
+                                                    (df_base_tabs['Fournisseur'] == supplier_name_adj_eval)
                                                 ]
                                                 if not matching_rows_in_base.empty:
-                                                    sales_source_row = matching_rows_in_base.iloc[0] # Assume first match is fine
-                                                    # Ensure the sales columns for WoS are actually in df_base_tabs
+                                                    sales_source_row = matching_rows_in_base.iloc[0] 
                                                     actual_sales_cols_for_wos = [
                                                         c for c in semaine_cols_for_wos_sup_eval 
                                                         if c in df_base_tabs.columns and c in sales_source_row.index
                                                     ]
                                                     if actual_sales_cols_for_wos:
                                                         original_item_sales_data_series_eval = sales_source_row[actual_sales_cols_for_wos].fillna(0)
-                                                    # current_stock_item_wos_eval = sales_source_row['Stock'] # Get stock from base_tabs as well for consistency in WoS calc
+                                                    # current_stock_item_wos_eval = sales_source_row['Stock'] # Use stock from current command item_row_wos
                                                 else:
                                                     logging.warning(f"WoS Sales: Ref Art '{ref_art_current_item_eval}' for supplier '{supplier_name_adj_eval}' not found in df_base_tabs for WoS calc in adjustment.")
                                             else:
@@ -903,35 +919,27 @@ if 'df_initial_filtered' in st.session_state and isinstance(st.session_state.df_
                                                 df_supplier_command_items_adj_eval.loc[item_idx_wos, 'WoS_Calculated_Supplier'] = current_stock_item_wos_eval / avg_weekly_sales_item_eval
                                             elif current_stock_item_wos_eval <= 0: 
                                                 df_supplier_command_items_adj_eval.loc[item_idx_wos, 'WoS_Calculated_Supplier'] = 0.0
-                                            # else WoS remains np.inf if stock > 0 and sales = 0
                                             
                                             srm_cond_eval = item_row_wos['Conditionnement']
-                                            # SRM: at least one packaging, or one week of sales (rounded to packaging)
                                             srm_1wk_sales_qty_eval = 0
                                             if avg_weekly_sales_item_eval > 0 and srm_cond_eval > 0:
                                                 srm_1wk_sales_qty_eval = np.ceil(avg_weekly_sales_item_eval / srm_cond_eval) * srm_cond_eval
-                                            elif avg_weekly_sales_item_eval > 0 and srm_cond_eval <= 0: # Conditionnement invalid, use raw sales
+                                            elif avg_weekly_sales_item_eval > 0 and srm_cond_eval <= 0: 
                                                 srm_1wk_sales_qty_eval = np.ceil(avg_weekly_sales_item_eval)
                                             
-                                            # SRM is at least one packaging unit, or the calculated 1-week sales qty.
                                             df_supplier_command_items_adj_eval.loc[item_idx_wos, 'SRM_Qty'] = max(srm_cond_eval if srm_cond_eval > 0 else 0, srm_1wk_sales_qty_eval)
-
 
                                     candidates_reduc_supplier_eval = df_supplier_command_items_adj_eval[df_supplier_command_items_adj_eval['Qté Cmdée (IA)'] > 0].copy()
                                     if not candidates_reduc_supplier_eval.empty:
                                         candidates_reduc_supplier_eval.sort_values(by='WoS_Calculated_Supplier', ascending=False, inplace=True, na_position='first')
                                         value_reduced_supplier_total_eval = 0.0
                                         
-                                        for item_index_reduc_sup in candidates_reduc_supplier_eval.index: # These are indices from df_supplier_command_items_adj_eval
+                                        for item_index_reduc_sup in candidates_reduc_supplier_eval.index: 
                                             if value_to_reduce_from_supplier_cmd_eval <= 0.01: break
                                             
-                                            # Get values directly from df_to_adjust_iteratively using the same index
-                                            # This ensures we modify the correct DataFrame that will be passed on.
                                             current_qty_reduc_sup = df_to_adjust_iteratively.loc[item_index_reduc_sup, 'Qté Cmdée (IA)']
                                             packaging_reduc_sup = df_to_adjust_iteratively.loc[item_index_reduc_sup, 'Conditionnement']
                                             price_reduc_sup = df_to_adjust_iteratively.loc[item_index_reduc_sup, "Tarif d'achat"]
-                                            
-                                            # SRM_Qty was calculated on df_supplier_command_items_adj_eval, which shares index with current iteration
                                             srm_sup = candidates_reduc_supplier_eval.loc[item_index_reduc_sup, 'SRM_Qty']
                                             
                                             if packaging_reduc_sup > 0 and price_reduc_sup > 0 and current_qty_reduc_sup > srm_sup :
@@ -942,7 +950,7 @@ if 'df_initial_filtered' in st.session_state and isinstance(st.session_state.df_
                                                     num_pkgs_to_reach_target_item = int(value_to_reduce_from_supplier_cmd_eval / value_per_pkg_reduc_sup) if value_per_pkg_reduc_sup > 0 else 0
                                                     num_pkgs_actually_reduce_item = min(num_pkgs_can_remove_item, num_pkgs_to_reach_target_item)
                                                     if num_pkgs_actually_reduce_item == 0 and num_pkgs_can_remove_item > 0 and value_to_reduce_from_supplier_cmd_eval > value_per_pkg_reduc_sup * 0.1:
-                                                         num_pkgs_actually_reduce_item = 1 # Reduce at least one if possible and still over target
+                                                         num_pkgs_actually_reduce_item = 1 
                                                     if num_pkgs_actually_reduce_item > 0:
                                                         qty_amount_to_reduce_sup = num_pkgs_actually_reduce_item * packaging_reduc_sup
                                                         value_of_this_reduction_sup = qty_amount_to_reduce_sup * price_reduc_sup
@@ -1074,7 +1082,7 @@ if 'df_initial_filtered' in st.session_state and isinstance(st.session_state.df_
                                         total_row_xl_idx_ai_dl=n_r_ai_dl+2
                                         ws_ai_dl.cell(row=total_row_xl_idx_ai_dl, column=lbl_col_idx_excel_ai, value="TOTAL").font=Font(bold=True)
                                         cell_gt_ai_dl=ws_ai_dl.cell(row=total_row_xl_idx_ai_dl, column=total_col_idx_excel_ai)
-                                        if n_r_ai_dl>0 and t_ai_dl in exp_cols_sheet_ai_dl:cell_gt_ai_dl.value=f"=SUM({t_l_ai_dl}2:{t_l_ai_dl}{n_r_ai_dl+1})"
+                                        if n_r_ai_dl>0 and t_ai_dl in exp_cols_sheet_ai_dl and f_ok_ai_dl :cell_gt_ai_dl.value=f"=SUM({t_l_ai_dl}2:{t_l_ai_dl}{n_r_ai_dl+1})"
                                         else:cell_gt_ai_dl.value=0
                                         cell_gt_ai_dl.number_format='#,##0.00€';cell_gt_ai_dl.font=Font(bold=True)
                                         min_req_row_xl_idx_ai_dl=n_r_ai_dl+3
@@ -1135,7 +1143,8 @@ if 'df_initial_filtered' in st.session_state and isinstance(st.session_state.df_
                                                 
                                                 ws_ignored.cell(row=n_r_ign + 2, column=lbl_col_ign_idx, value="TOTAL IGNORÉ").font = Font(bold=True)
                                                 cell_gt_ign = ws_ignored[f"{t_col_ign_letter}{n_r_ign + 2}"]
-                                                cell_gt_ign.value = f"=SUM({t_col_ign_letter}2:{t_col_ign_letter}{n_r_ign + 1})"
+                                                if f_ok_ai_dl: cell_gt_ign.value = f"=SUM({t_col_ign_letter}2:{t_col_ign_letter}{n_r_ign + 1})"
+                                                else: cell_gt_ign.value = df_sheet_ignored_export["Total Cmd (€) (IA)"].sum() # Fallback if letter not found
                                                 cell_gt_ign.number_format = '#,##0.00€'; cell_gt_ign.font = Font(bold=True)
                                             sheets_ignored_count += 1
                                 if sheets_ignored_count > 0:
@@ -1240,7 +1249,7 @@ if 'df_initial_filtered' in st.session_state and isinstance(st.session_state.df_
         if 'product_events' not in st.session_state: st.session_state.product_events = []
         st.subheader("Ajouter un Nouvel Événement")
         if not st.session_state.df_initial_filtered.empty and "Référence Article" in st.session_state.df_initial_filtered.columns:
-            product_ref_series = st.session_state.df_initial_filtered["Référence Article"].astype(str).replace('nan', '')
+            product_ref_series = st.session_state.df_initial_filtered["Référence Article"].astype(str).str.strip().replace('nan', '')
             product_list_events = [""] + sorted(list(product_ref_series[product_ref_series != ""].unique()))
 
             col_event1, col_event2, col_event3 = st.columns(3)
@@ -1249,10 +1258,15 @@ if 'df_initial_filtered' in st.session_state and isinstance(st.session_state.df_
             with col_event3: event_date_input = st.date_input("Date de l'événement:", key="event_date_in", value=pd.Timestamp.now().date())
             if st.button("➕ Ajouter Événement", key="add_event_product_btn"):
                 if selected_product_ref_event and event_name_input and event_date_input:
-                    clean_event_name = sanitize_supplier_key(event_name_input) 
+                    # Sanitize event name, ensure it's a string before sanitizing
+                    clean_event_name = sanitize_supplier_key(str(event_name_input).strip()) 
                     if not clean_event_name or clean_event_name == "invalid_supplier_key_name": st.error("Nom d'événement invalide.")
                     else:
-                        new_event_entry = {"product_ref": selected_product_ref_event, "event_name": clean_event_name, "ds": pd.to_datetime(event_date_input)}
+                        new_event_entry = {
+                            "product_ref": str(selected_product_ref_event).strip(), # Ensure stored as stripped string
+                            "event_name": clean_event_name, 
+                            "ds": pd.to_datetime(event_date_input) # Store as datetime
+                        }
                         st.session_state.product_events.append(new_event_entry)
                         st.success(f"Événement '{clean_event_name}' ajouté pour {selected_product_ref_event} le {event_date_input.strftime('%d/%m/%Y')}.")
                         st.rerun()
@@ -1260,27 +1274,34 @@ if 'df_initial_filtered' in st.session_state and isinstance(st.session_state.df_
         else: st.warning("Chargez un fichier avec 'Référence Article' pour ajouter des événements.")
         st.markdown("---"); st.subheader("Événements Enregistrés")
         if st.session_state.product_events:
-            events_df_display = pd.DataFrame(st.session_state.product_events)
-            if not events_df_display.empty:
-                events_df_display_fmt = events_df_display.copy()
-                if 'ds' in events_df_display_fmt.columns: 
-                    events_df_display_fmt['ds'] = pd.to_datetime(events_df_display_fmt['ds']).dt.strftime('%d/%m/%Y')
-                st.dataframe(events_df_display_fmt)
-                if st.checkbox("Afficher options de suppression", key="show_remove_events_cb_new"):
-                    def format_event_for_multiselect(idx):
-                        event = events_df_display.loc[idx]
-                        date_str = pd.to_datetime(event['ds']).strftime('%d/%m/%Y') if pd.notna(event['ds']) else "Date N/A"
-                        return f"Idx {idx}: {event.get('product_ref','N/A')} - {event.get('event_name','N/A')} @ {date_str}"
+            try:
+                events_df_display = pd.DataFrame(st.session_state.product_events)
+                if not events_df_display.empty:
+                    events_df_display_fmt = events_df_display.copy()
+                    if 'ds' in events_df_display_fmt.columns: 
+                        events_df_display_fmt['ds'] = pd.to_datetime(events_df_display_fmt['ds']).dt.strftime('%d/%m/%Y')
+                    st.dataframe(events_df_display_fmt)
+                    if st.checkbox("Afficher options de suppression", key="show_remove_events_cb_new"):
+                        def format_event_for_multiselect(idx):
+                            event = events_df_display.loc[idx]
+                            date_str = pd.to_datetime(event['ds']).strftime('%d/%m/%Y') if pd.notna(event['ds']) else "Date N/A"
+                            ref_str = str(event.get('product_ref','N/A')).strip()
+                            name_str = str(event.get('event_name','N/A')).strip()
+                            return f"Idx {idx}: {ref_str} - {name_str} @ {date_str}"
 
-                    events_to_remove_indices = st.multiselect( "Sélectionner événements à supprimer (par index):", 
-                                                              options=list(events_df_display.index), 
-                                                              format_func=format_event_for_multiselect)
-                    if st.button("Supprimer Événements Sélectionnés", key="remove_events_btn_new") and events_to_remove_indices:
-                        for index_to_remove in sorted(events_to_remove_indices, reverse=True):
-                            try: del st.session_state.product_events[index_to_remove]
-                            except IndexError: pass
-                        st.success("Événements supprimés."); st.rerun()
-            else: st.info("Aucun événement produit enregistré.")
+                        events_to_remove_indices = st.multiselect( "Sélectionner événements à supprimer (par index):", 
+                                                                options=list(events_df_display.index), 
+                                                                format_func=format_event_for_multiselect)
+                        if st.button("Supprimer Événements Sélectionnés", key="remove_events_btn_new") and events_to_remove_indices:
+                            for index_to_remove in sorted(events_to_remove_indices, reverse=True):
+                                try: del st.session_state.product_events[index_to_remove]
+                                except IndexError: pass
+                            st.success("Événements supprimés."); st.rerun()
+                else: st.info("Aucun événement produit enregistré.")
+            except Exception as e_disp_events:
+                st.error(f"Erreur affichage événements: {e_disp_events}")
+                logging.error(f"Erreur affichage événements: {e_disp_events}")
+                st.info("Liste d'événements potentiellement corrompue. Essayez de réinitialiser si le problème persiste.")
         else: st.info("Aucun événement produit enregistré.")
 
 # Fallback if no file is uploaded or if data loading failed and state was reset
