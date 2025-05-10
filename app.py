@@ -1,4 +1,5 @@
-# --- START OF FINAL COMPLETE CORRECTED app.py (v20 - Event Handling Debug) ---
+
+# --- START OF FINAL COMPLETE CORRECTED app.py (v21 - Events Disabled for Test) ---
 
 import streamlit as st
 import pandas as pd
@@ -421,7 +422,7 @@ def parse_week_column_to_date(col_name_str):
 
 def ai_calculate_order_quantities(df_products_for_ai, historical_semaine_cols, num_forecast_weeks,
                                   min_order_amount_for_subset=0.0, apply_special_rules=True,
-                                  product_events_list=None):
+                                  product_events_list=None): # product_events_list is kept for signature but won't be used
     if not PROPHET_AVAILABLE: st.error("Librairie Prophet (IA) non installée."); return None, 0.0
     if df_products_for_ai.empty: st.info("Aucune donnée produit pour prévision IA."); return None, 0.0
     base_req_cols = ["Stock", "Conditionnement", "Tarif d'achat", "Référence Article"]
@@ -448,8 +449,7 @@ def ai_calculate_order_quantities(df_products_for_ai, historical_semaine_cols, n
 
     for i, (prod_idx, prod_row) in enumerate(df_calc_ai.iterrows()):
         progress_bar_placeholder.progress((i + 1) / num_prods, text=f"Prévision IA: Article {i+1}/{num_prods}")
-        prod_ref_log = str(prod_row.get("Référence Article", f"Index {prod_idx}")).strip() # Ensure string and stripped
-        # logging.info(f"Prévision IA pour: {prod_ref_log}") # Can be verbose, enable if needed
+        prod_ref_log = str(prod_row.get("Référence Article", f"Index {prod_idx}")).strip()
         
         prod_ts_hist = [{'ds': ps_row['date'], 'y': prod_row.get(ps_row['col_name'], np.nan)} for _, ps_row in parsed_sales_df_map.iterrows()]
         prod_ts_df_fit = pd.DataFrame(prod_ts_hist).dropna(subset=['ds'])
@@ -457,41 +457,42 @@ def ai_calculate_order_quantities(df_products_for_ai, historical_semaine_cols, n
             logging.warning(f"Produit {prod_ref_log}: <12 points ventes. Prévision IA ignorée."); df_calc_ai.loc[prod_idx, "Qté Cmdée (IA)"] = 0; df_calc_ai.loc[prod_idx, "Forecast Ventes (IA)"] = 0.0; continue
         try:
             model_prophet = Prophet(uncertainty_samples=0)
+            
+            # --- EVENTS SECTION TEMPORARILY DISABLED FOR TEST ---
             holidays_df_for_prophet = None
-
-            if product_events_list and prod_ref_log:
-                current_product_events_prophet = []
-                for event in product_events_list:
-                    event_prod_ref = event.get("product_ref")
-                    if event_prod_ref is not None and str(event_prod_ref).strip() == prod_ref_log and pd.notna(event.get('ds')):
-                        current_product_events_prophet.append({
-                            'holiday': str(event['event_name']).strip(), 
-                            'ds': event['ds'], # Should be datetime from creation
-                            'lower_window': 0,
-                            'upper_window': 0
-                        })
+            # if product_events_list and prod_ref_log:
+            #     current_product_events_prophet = []
+            #     for event in product_events_list:
+            #         event_prod_ref = event.get("product_ref")
+            #         if event_prod_ref is not None and str(event_prod_ref).strip() == prod_ref_log and pd.notna(event.get('ds')):
+            #             current_product_events_prophet.append({
+            #                 'holiday': str(event['event_name']).strip(), 
+            #                 'ds': event['ds'], 
+            #                 'lower_window': 0,
+            #                 'upper_window': 0
+            #             })
                 
-                if current_product_events_prophet:
-                    holidays_df_for_prophet = pd.DataFrame(current_product_events_prophet)
-                    if not holidays_df_for_prophet.empty and 'ds' in holidays_df_for_prophet.columns:
-                        if not pd.api.types.is_datetime64_any_dtype(holidays_df_for_prophet['ds']):
-                            logging.error(f"Pour {prod_ref_log}: La colonne 'ds' dans holidays_df_for_prophet n'est PAS datetime! Conversion.")
-                            holidays_df_for_prophet['ds'] = pd.to_datetime(holidays_df_for_prophet['ds'], errors='coerce')
+            #     if current_product_events_prophet:
+            #         holidays_df_for_prophet = pd.DataFrame(current_product_events_prophet)
+            #         if not holidays_df_for_prophet.empty and 'ds' in holidays_df_for_prophet.columns:
+            #             if not pd.api.types.is_datetime64_any_dtype(holidays_df_for_prophet['ds']):
+            #                 logging.error(f"Pour {prod_ref_log}: La colonne 'ds' dans holidays_df_for_prophet n'est PAS datetime! Conversion.")
+            #                 holidays_df_for_prophet['ds'] = pd.to_datetime(holidays_df_for_prophet['ds'], errors='coerce')
                         
-                        holidays_df_for_prophet = holidays_df_for_prophet.dropna(subset=['ds', 'holiday']) # Drop rows if conversion failed or holiday name is bad
-                        if holidays_df_for_prophet.empty:
-                            logging.warning(f"Pour {prod_ref_log}: holidays_df_for_prophet est vide après dropna. Aucun événement valide.")
-                            holidays_df_for_prophet = None # Reset to None if all events became invalid
-                    else: # DataFrame became empty or 'ds' column was missing
-                        holidays_df_for_prophet = None
+            #             holidays_df_for_prophet = holidays_df_for_prophet.dropna(subset=['ds', 'holiday']) 
+            #             if holidays_df_for_prophet.empty:
+            #                 logging.warning(f"Pour {prod_ref_log}: holidays_df_for_prophet est vide après dropna. Aucun événement valide.")
+            #                 holidays_df_for_prophet = None 
+            #         else: 
+            #             holidays_df_for_prophet = None
+            # --- END OF EVENTS SECTION TEMPORARILY DISABLED ---
 
             if not prod_ts_df_fit.empty and 'ds' in prod_ts_df_fit.columns and pd.api.types.is_datetime64_any_dtype(prod_ts_df_fit['ds']):
                 if (prod_ts_df_fit['ds'].max() - prod_ts_df_fit['ds'].min()) >= pd.Timedelta(days=365 + 180): 
                     model_prophet.add_seasonality(name='yearly', period=365.25, fourier_order=10)
             
-            # Temporarily remove SuppressStdoutStderr for debugging fit if issues persist
-            # with SuppressStdoutStderr():
-            model_prophet.fit(prod_ts_df_fit[['ds', 'y']].dropna(subset=['y']), holidays=holidays_df_for_prophet)
+            with SuppressStdoutStderr(): # Keep suppressed for now, remove if fit still fails
+                model_prophet.fit(prod_ts_df_fit[['ds', 'y']].dropna(subset=['y']), holidays=holidays_df_for_prophet) # holidays_df_for_prophet will be None
             
             future_df = model_prophet.make_future_dataframe(periods=num_forecast_weeks, freq='W-MON')
             forecast_df_res = model_prophet.predict(future_df)
@@ -512,7 +513,6 @@ def ai_calculate_order_quantities(df_products_for_ai, historical_semaine_cols, n
             df_calc_ai.loc[prod_idx, "Qté Cmdée (IA)"] = order_qty_item_ia
         except Exception as e_ph: 
             logging.error(f"Erreur Prophet pour {prod_ref_log}: {e_ph}")
-            # st.toast(f"Erreur Prophet pour {prod_ref_log}: {e_ph}", icon="🔥") # Dev only
             df_calc_ai.loc[prod_idx, "Qté Cmdée (IA)"] = 0
             df_calc_ai.loc[prod_idx, "Forecast Ventes (IA)"] = 0.0
     progress_bar_placeholder.empty()
@@ -556,7 +556,7 @@ def get_default_session_state():
         'ai_ignored_orders_df': None,
         'ai_excluded_suppliers_from_stock_target': [], 
         'supplier_evaluation_data': None, 'global_stock_target_config': 3200000.0,
-        'product_events': [],
+        'product_events': [], # Events are still stored, just not used in AI calc for this test
         'rotation_result_df': None, 'rotation_analysis_period_label': "12 dernières semaines",
         'rotation_suppliers_calculated_for': [], 'rotation_threshold_value': 1.0,
         'show_all_rotation_data': True, 'rotation_params_calculated_for': {},
@@ -711,6 +711,9 @@ if 'df_initial_filtered' in st.session_state and isinstance(st.session_state.df_
     # --- Tab 1 AI: Prévision Commande (IA) ---
     with tab1_ai:
         st.header("🤖 Prévision des Quantités à Commander (avec IA)")
+        # TEST MESSAGE
+        st.warning("MODE TEST: La fonctionnalité 'Gestion Événements' est temporairement désactivée pour ce calcul IA.")
+
         if not PROPHET_AVAILABLE:
             st.error("La librairie Prophet (pour l'IA) n'est pas installée. Cette fonctionnalité est désactivée.")
         else:
@@ -783,14 +786,18 @@ if 'df_initial_filtered' in st.session_state and isinstance(st.session_state.df_
                         'min_amount_ui': min_amt_ai_t1,
                         'sem_cols_hash': hash(tuple(id_sem_cols)),
                         'excluded_suppliers_stock_target': sorted(list(st.session_state.get('ai_excluded_suppliers_from_stock_target', [])))
+                        # 'events_active': False # Could add a param to track if events were active for this calc
                     }
                     st.session_state.ai_commande_params_calculated_for = curr_calc_params_t1_ai
 
                     res_dfs_list_ai_calc = []
                     calc_ok_overall_ai = True
-                    st.info(f"Lancement prévision IA pour {len(sel_f_t1_ai)} fournisseur(s)...")
+                    st.info(f"Lancement prévision IA pour {len(sel_f_t1_ai)} fournisseur(s)... (Événements désactivés pour ce test)")
 
-                    events_for_calculation = st.session_state.get('product_events', [])
+                    # For this test, product_events_list is passed as None to ai_calculate_order_quantities
+                    # or the function itself will ignore it.
+                    # events_for_calculation = st.session_state.get('product_events', []) # Original line
+                    events_for_calculation = None # TEST: Disable events
 
                     for sup_idx_ai, sup_name_proc_ai in enumerate(sel_f_t1_ai):
                         df_sup_subset_ai_proc = df_disp_t1_ai[df_disp_t1_ai["Fournisseur"] == sup_name_proc_ai].copy()
@@ -798,7 +805,7 @@ if 'df_initial_filtered' in st.session_state and isinstance(st.session_state.df_
                         if not df_sup_subset_ai_proc.empty:
                             ai_res_df_sup, _ = ai_calculate_order_quantities(
                                 df_sup_subset_ai_proc, id_sem_cols, fcst_w_ai_t1, sup_specific_min_order_ai,
-                                product_events_list=events_for_calculation
+                                product_events_list=events_for_calculation # Will be None for this test
                             )
                             if ai_res_df_sup is not None: res_dfs_list_ai_calc.append(ai_res_df_sup)
                             else: st.error(f"Échec calcul IA pour: {sup_name_proc_ai}"); calc_ok_overall_ai = False
@@ -887,7 +894,7 @@ if 'df_initial_filtered' in st.session_state and isinstance(st.session_state.df_
                                     
                                     df_supplier_command_items_adj_eval['WoS_Calculated_Supplier'] = np.inf
                                     df_supplier_command_items_adj_eval['SRM_Qty'] = 0
-                                    if weeks_to_use_for_wos_supplier_eval > 0 and not df_base_tabs.empty: # Ensure df_base_tabs is available
+                                    if weeks_to_use_for_wos_supplier_eval > 0 and not df_base_tabs.empty: 
                                         semaine_cols_for_wos_sup_eval = id_sem_cols[-weeks_to_use_for_wos_supplier_eval:]
                                         for item_idx_wos, item_row_wos in df_supplier_command_items_adj_eval.iterrows():
                                             original_item_sales_data_series_eval = pd.Series(dtype='float64')
@@ -907,7 +914,6 @@ if 'df_initial_filtered' in st.session_state and isinstance(st.session_state.df_
                                                     ]
                                                     if actual_sales_cols_for_wos:
                                                         original_item_sales_data_series_eval = sales_source_row[actual_sales_cols_for_wos].fillna(0)
-                                                    # current_stock_item_wos_eval = sales_source_row['Stock'] # Use stock from current command item_row_wos
                                                 else:
                                                     logging.warning(f"WoS Sales: Ref Art '{ref_art_current_item_eval}' for supplier '{supplier_name_adj_eval}' not found in df_base_tabs for WoS calc in adjustment.")
                                             else:
@@ -1057,10 +1063,16 @@ if 'df_initial_filtered' in st.session_state and isinstance(st.session_state.df_
                                 with pd.ExcelWriter(out_b_ai_exp_dl, engine="openpyxl") as writer_ai_exp_dl:
                                     exp_cols_sheet_ai_dl = [c for c in disp_cols_ai_final if c != 'Fournisseur' and c != 'WoS_Calculated_Supplier']
                                     q_ai_dl, p_ai_dl, t_ai_dl = "Qté Cmdée (IA)", "Tarif d'achat", "Total Cmd (€) (IA)"
-                                    f_ok_ai_dl = False
+                                    f_ok_ai_dl = False # Flag to check if main monetary columns for formula exist
                                     if all(c_ai_dl in exp_cols_sheet_ai_dl for c_ai_dl in [q_ai_dl,p_ai_dl,t_ai_dl]):
-                                        try: q_l_ai_dl,p_l_ai_dl,t_l_ai_dl=get_column_letter(exp_cols_sheet_ai_dl.index(q_ai_dl)+1),get_column_letter(exp_cols_sheet_ai_dl.index(p_ai_dl)+1),get_column_letter(exp_cols_sheet_ai_dl.index(t_ai_dl)+1);f_ok_ai_dl=True
-                                        except ValueError: pass
+                                        try: 
+                                            q_l_ai_dl=get_column_letter(exp_cols_sheet_ai_dl.index(q_ai_dl)+1)
+                                            p_l_ai_dl=get_column_letter(exp_cols_sheet_ai_dl.index(p_ai_dl)+1)
+                                            t_l_ai_dl=get_column_letter(exp_cols_sheet_ai_dl.index(t_ai_dl)+1)
+                                            f_ok_ai_dl=True
+                                        except ValueError: 
+                                            logging.error("Error getting column letters for IA export formulas.")
+                                            pass # f_ok_ai_dl remains False
 
                                     suppliers_in_final_export = df_exp_ai_final_dl['Fournisseur'].unique()
                                     for sup_e_ai_dl in suppliers_in_final_export:
@@ -1071,20 +1083,31 @@ if 'df_initial_filtered' in st.session_state and isinstance(st.session_state.df_
                                         ws_ai_dl=writer_ai_exp_dl.sheets[s_nm_ai_dl]
                                         cmd_col_fmts_ai_dl={"Stock":"#,##0","Forecast Ventes (IA)":"#,##0.00","Conditionnement":"#,##0","Qté Cmdée (IA)":"#,##0","Stock Terme (IA)":"#,##0","Tarif d'achat":"#,##0.00€"}
                                         format_excel_sheet(ws_ai_dl,df_w_s_ai_dl,column_formats=cmd_col_fmts_ai_dl)
-                                        if f_ok_ai_dl and n_r_ai_dl>0:
-                                            for r_idx_ai_dl in range(2,n_r_ai_dl+2):cell_t_ai_dl=ws_ai_dl[f"{t_l_ai_dl}{r_idx_ai_dl}"];cell_t_ai_dl.value=f"={q_l_ai_dl}{r_idx_ai_dl}*{p_l_ai_dl}{r_idx_ai_dl}";cell_t_ai_dl.number_format='#,##0.00€'
+                                        
+                                        if f_ok_ai_dl and n_r_ai_dl > 0: # Apply formula only if columns exist and there's data
+                                            for r_idx_ai_dl in range(2,n_r_ai_dl+2):
+                                                cell_t_ai_dl=ws_ai_dl[f"{t_l_ai_dl}{r_idx_ai_dl}"]
+                                                cell_t_ai_dl.value=f"={q_l_ai_dl}{r_idx_ai_dl}*{p_l_ai_dl}{r_idx_ai_dl}"
+                                                cell_t_ai_dl.number_format='#,##0.00€'
+                                        
                                         lbl_name_col_ai_dl="Désignation Article"
                                         if lbl_name_col_ai_dl not in exp_cols_sheet_ai_dl: lbl_name_col_ai_dl = exp_cols_sheet_ai_dl[1] if len(exp_cols_sheet_ai_dl)>1 else exp_cols_sheet_ai_dl[0]
                                         
                                         lbl_col_idx_excel_ai = exp_cols_sheet_ai_dl.index(lbl_name_col_ai_dl)+1 if lbl_name_col_ai_dl in exp_cols_sheet_ai_dl else 1
-                                        total_col_idx_excel_ai = exp_cols_sheet_ai_dl.index(t_ai_dl)+1 if t_ai_dl in exp_cols_sheet_ai_dl else len(exp_cols_sheet_ai_dl)
+                                        total_col_idx_excel_ai = exp_cols_sheet_ai_dl.index(t_ai_dl)+1 if t_ai_dl in exp_cols_sheet_ai_dl and f_ok_ai_dl else (exp_cols_sheet_ai_dl.index(p_ai_dl)+1 if p_ai_dl in exp_cols_sheet_ai_dl and f_ok_ai_dl else len(exp_cols_sheet_ai_dl))
+
 
                                         total_row_xl_idx_ai_dl=n_r_ai_dl+2
                                         ws_ai_dl.cell(row=total_row_xl_idx_ai_dl, column=lbl_col_idx_excel_ai, value="TOTAL").font=Font(bold=True)
                                         cell_gt_ai_dl=ws_ai_dl.cell(row=total_row_xl_idx_ai_dl, column=total_col_idx_excel_ai)
-                                        if n_r_ai_dl>0 and t_ai_dl in exp_cols_sheet_ai_dl and f_ok_ai_dl :cell_gt_ai_dl.value=f"=SUM({t_l_ai_dl}2:{t_l_ai_dl}{n_r_ai_dl+1})"
-                                        else:cell_gt_ai_dl.value=0
+                                        if n_r_ai_dl > 0 and f_ok_ai_dl:
+                                            cell_gt_ai_dl.value=f"=SUM({t_l_ai_dl}2:{t_l_ai_dl}{n_r_ai_dl+1})"
+                                        elif n_r_ai_dl > 0 and t_ai_dl in df_w_s_ai_dl.columns: # Fallback to sum if formula setup failed but col exists
+                                             cell_gt_ai_dl.value = df_w_s_ai_dl[t_ai_dl].sum()
+                                        else:
+                                            cell_gt_ai_dl.value=0
                                         cell_gt_ai_dl.number_format='#,##0.00€';cell_gt_ai_dl.font=Font(bold=True)
+                                        
                                         min_req_row_xl_idx_ai_dl=n_r_ai_dl+3
                                         ws_ai_dl.cell(row=min_req_row_xl_idx_ai_dl, column=lbl_col_idx_excel_ai, value="Min Requis Fourn.").font=Font(bold=True)
                                         cell_min_req_v_ai_dl=ws_ai_dl.cell(row=min_req_row_xl_idx_ai_dl, column=total_col_idx_excel_ai)
@@ -1136,16 +1159,31 @@ if 'df_initial_filtered' in st.session_state and isinstance(st.session_state.df_
                                             ignored_fmts_excel = {"Stock":"#,##0", "Forecast Ventes (IA)":"#,##0.00", "Conditionnement":"#,##0", "Qté Cmdée (IA)":"#,##0", "Total Cmd (€) (IA)":"#,##0.00€"}
                                             format_excel_sheet(ws_ignored, df_sheet_ignored_export, column_formats=ignored_fmts_excel)
                                             n_r_ign = len(df_sheet_ignored_export)
-                                            if n_r_ign > 0 and "Total Cmd (€) (IA)" in cols_to_write_sheet_ignored and "Désignation Article" in cols_to_write_sheet_ignored :
-                                                t_col_ign_letter = get_column_letter(cols_to_write_sheet_ignored.index("Total Cmd (€) (IA)") + 1)
-                                                lbl_col_ign_name = "Désignation Article"
+                                            # Check if necessary columns for formula exist
+                                            formula_cols_exist_ign = "Total Cmd (€) (IA)" in cols_to_write_sheet_ignored and "Désignation Article" in cols_to_write_sheet_ignored
+                                            if n_r_ign > 0 and formula_cols_exist_ign:
+                                                try:
+                                                    t_col_ign_letter = get_column_letter(cols_to_write_sheet_ignored.index("Total Cmd (€) (IA)") + 1)
+                                                    lbl_col_ign_name = "Désignation Article" # Assume this column exists if formula_cols_exist_ign is True
+                                                    lbl_col_ign_idx = cols_to_write_sheet_ignored.index(lbl_col_ign_name) + 1
+                                                    
+                                                    ws_ignored.cell(row=n_r_ign + 2, column=lbl_col_ign_idx, value="TOTAL IGNORÉ").font = Font(bold=True)
+                                                    cell_gt_ign = ws_ignored[f"{t_col_ign_letter}{n_r_ign + 2}"]
+                                                    cell_gt_ign.value = f"=SUM({t_col_ign_letter}2:{t_col_ign_letter}{n_r_ign + 1})"
+                                                    cell_gt_ign.number_format = '#,##0.00€'; cell_gt_ign.font = Font(bold=True)
+                                                except ValueError: # If column letter lookup fails
+                                                    logging.error("Error creating SUM formula for ignored orders sheet.")
+                                                    # Could add a fallback to sum manually here if needed
+                                            elif n_r_ign > 0 and "Total Cmd (€) (IA)" in df_sheet_ignored_export.columns: # Fallback if formula can't be made but col exists
+                                                lbl_col_ign_name = "Désignation Article" if "Désignation Article" in cols_to_write_sheet_ignored else (cols_to_write_sheet_ignored[0] if cols_to_write_sheet_ignored else "A")
                                                 lbl_col_ign_idx = cols_to_write_sheet_ignored.index(lbl_col_ign_name) +1 if lbl_col_ign_name in cols_to_write_sheet_ignored else 1
-                                                
+                                                total_col_idx_ign = cols_to_write_sheet_ignored.index("Total Cmd (€) (IA)") + 1
                                                 ws_ignored.cell(row=n_r_ign + 2, column=lbl_col_ign_idx, value="TOTAL IGNORÉ").font = Font(bold=True)
-                                                cell_gt_ign = ws_ignored[f"{t_col_ign_letter}{n_r_ign + 2}"]
-                                                if f_ok_ai_dl: cell_gt_ign.value = f"=SUM({t_col_ign_letter}2:{t_col_ign_letter}{n_r_ign + 1})"
-                                                else: cell_gt_ign.value = df_sheet_ignored_export["Total Cmd (€) (IA)"].sum() # Fallback if letter not found
+                                                cell_gt_ign = ws_ignored.cell(row=n_r_ign + 2, column=total_col_idx_ign)
+                                                cell_gt_ign.value = df_sheet_ignored_export["Total Cmd (€) (IA)"].sum()
                                                 cell_gt_ign.number_format = '#,##0.00€'; cell_gt_ign.font = Font(bold=True)
+
+
                                             sheets_ignored_count += 1
                                 if sheets_ignored_count > 0:
                                     out_b_ignored.seek(0)
@@ -1245,7 +1283,7 @@ if 'df_initial_filtered' in st.session_state and isinstance(st.session_state.df_
     # --- Tab: Product Events Management ---
     with tab_events:
         st.header("📅 Gestion des Événements Spécifiques aux Produits")
-        st.caption("Ces événements peuvent être utilisés par l'IA pour affiner les prévisions.")
+        st.caption("Ces événements peuvent être utilisés par l'IA pour affiner les prévisions. (Actuellement désactivé dans le calcul IA pour test)") # TEST MESSAGE
         if 'product_events' not in st.session_state: st.session_state.product_events = []
         st.subheader("Ajouter un Nouvel Événement")
         if not st.session_state.df_initial_filtered.empty and "Référence Article" in st.session_state.df_initial_filtered.columns:
@@ -1258,14 +1296,13 @@ if 'df_initial_filtered' in st.session_state and isinstance(st.session_state.df_
             with col_event3: event_date_input = st.date_input("Date de l'événement:", key="event_date_in", value=pd.Timestamp.now().date())
             if st.button("➕ Ajouter Événement", key="add_event_product_btn"):
                 if selected_product_ref_event and event_name_input and event_date_input:
-                    # Sanitize event name, ensure it's a string before sanitizing
                     clean_event_name = sanitize_supplier_key(str(event_name_input).strip()) 
                     if not clean_event_name or clean_event_name == "invalid_supplier_key_name": st.error("Nom d'événement invalide.")
                     else:
                         new_event_entry = {
-                            "product_ref": str(selected_product_ref_event).strip(), # Ensure stored as stripped string
+                            "product_ref": str(selected_product_ref_event).strip(), 
                             "event_name": clean_event_name, 
-                            "ds": pd.to_datetime(event_date_input) # Store as datetime
+                            "ds": pd.to_datetime(event_date_input) 
                         }
                         st.session_state.product_events.append(new_event_entry)
                         st.success(f"Événement '{clean_event_name}' ajouté pour {selected_product_ref_event} le {event_date_input.strftime('%d/%m/%Y')}.")
